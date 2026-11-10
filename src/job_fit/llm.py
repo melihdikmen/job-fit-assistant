@@ -8,8 +8,9 @@ import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
+import openai
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors as genai_errors
@@ -25,7 +26,20 @@ JSON_MIME_TYPE = "application/json"
 TEMPERATURE = 0.0
 THINKING_DISABLED = 0
 THINKING_AUTOMATIC = -1
-PROVIDERS_PLANNED_FOR_PHASE_3 = frozenset({"openrouter", "ollama"})
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
+# Ollama ignores the key, but the OpenAI SDK refuses to start without one.
+OLLAMA_PLACEHOLDER_KEY = "ollama"
+OPENAI_COMPATIBLE_PROVIDERS = frozenset({"openrouter", "ollama"})
+
+# OpenRouter can serve one model through several providers that differ in price,
+# quantization and speed. Each model used here is pinned to one provider so that a run
+# measures one thing. Key: OpenRouter model id. Value: OpenRouter provider name.
+OPENROUTER_PINNED_PROVIDERS: dict[str, str] = {
+    "nvidia/nemotron-3.5-super-vl:free": "nvidia",
+    "liquid/lfm-3-1.7b:free": "liquid",
+}
 
 
 class LLMError(RuntimeError):
@@ -49,6 +63,16 @@ class LLMResponse:
     latency_s: float
 
 
+def vertex_location() -> str:
+    """Return the Vertex AI location calls are sent to, for recording in run files.
+
+    Returns:
+        The value of ``GOOGLE_CLOUD_LOCATION``, or the default location.
+    """
+    load_dotenv()
+    return os.environ.get("GOOGLE_CLOUD_LOCATION") or DEFAULT_VERTEX_LOCATION
+
+
 @lru_cache(maxsize=1)
 def _vertex_client() -> genai.Client:
     """Create the Vertex AI client from environment variables.
@@ -63,8 +87,7 @@ def _vertex_client() -> genai.Client:
     project = os.environ.get("GOOGLE_CLOUD_PROJECT")
     if not project:
         raise LLMError("GOOGLE_CLOUD_PROJECT is not set. Copy .env.example to .env and fill it in.")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION") or DEFAULT_VERTEX_LOCATION
-    return genai.Client(vertexai=True, project=project, location=location)
+    return genai.Client(vertexai=True, project=project, location=vertex_location())
 
 
 def _thinking_config(reasoning: bool | None) -> types.ThinkingConfig | None:
@@ -142,6 +165,157 @@ def _generate_vertex(
     )
 
 
+@lru_cache(maxsize=2)
+def _openai_compatible_client(provider: str) -> openai.OpenAI:
+    """Create the client for a provider that speaks the OpenAI chat API.
+
+    Args:
+        provider: "openrouter" or "ollama".
+
+    Returns:
+        A client pointed at the provider's base URL.
+
+    Raises:
+        LLMError: If the provider needs an API key and none is set.
+    """
+    load_dotenv()
+    if provider == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise LLMError("OPENROUTER_API_KEY is not set. Add it to .env.")
+        base_url = OPENROUTER_BASE_URL
+    else:
+        api_key = OLLAMA_PLACEHOLDER_KEY
+        base_url = os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL
+    return openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=MAX_HTTP_ATTEMPTS - 1)
+
+
+def _json_schema_response_format(schema: type[BaseModel]) -> dict[str, Any]:
+    """Describe the expected JSON in the OpenAI ``response_format`` shape.
+
+    Args:
+        schema: Pydantic model the response must follow. Only its top level is closed
+            against extra keys, which is enough for a flat model such as JobDecision.
+
+    Returns:
+        The ``response_format`` value for a chat completion request.
+    """
+    json_schema = schema.model_json_schema()
+    json_schema["additionalProperties"] = False
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": schema.__name__, "strict": True, "schema": json_schema},
+    }
+
+
+def _openrouter_extra_body(model: str, reasoning: bool | None) -> dict[str, Any]:
+    """Build the OpenRouter-only request fields: provider pinning and reasoning.
+
+    Args:
+        model: OpenRouter model id.
+        reasoning: True to enable reasoning, False to disable it, None for the default.
+
+    Returns:
+        Fields to merge into the request body.
+
+    Raises:
+        LLMError: If the model has no pinned provider.
+    """
+    pinned = OPENROUTER_PINNED_PROVIDERS.get(model)
+    if pinned is None:
+        raise LLMError(
+            f"No pinned provider for OpenRouter model '{model}'. "
+            "Add it to OPENROUTER_PINNED_PROVIDERS in llm.py."
+        )
+    body: dict[str, Any] = {
+        # No fallbacks: a different provider would silently change what is measured.
+        # require_parameters: fail instead of ignoring the JSON schema.
+        "provider": {"order": [pinned], "allow_fallbacks": False, "require_parameters": True}
+    }
+    if reasoning is not None:
+        body["reasoning"] = {"enabled": reasoning}
+    return body
+
+
+def _extra_body(provider: str, model: str, reasoning: bool | None) -> dict[str, Any]:
+    """Build the provider-specific request fields of an OpenAI-compatible call.
+
+    Args:
+        provider: "openrouter" or "ollama".
+        model: Model id as the provider names it.
+        reasoning: True to enable reasoning, False to disable it, None for the default.
+
+    Returns:
+        Fields to merge into the request body; empty for Ollama.
+
+    Raises:
+        LLMError: If the reasoning switch is used with Ollama, or an OpenRouter model
+            has no pinned provider.
+    """
+    if provider == "openrouter":
+        return _openrouter_extra_body(model, reasoning)
+    if reasoning is not None:
+        raise LLMError("The reasoning switch is not supported for the ollama provider.")
+    return {}
+
+
+def _generate_openai_compatible(
+    client: openai.OpenAI,
+    model: str,
+    system: str,
+    user: str,
+    schema: type[BaseModel],
+    timeout_s: float,
+    extra_body: dict[str, Any],
+) -> LLMResponse:
+    """Call a model through an OpenAI-compatible chat endpoint and ask for JSON.
+
+    Args:
+        client: Client pointed at OpenRouter or Ollama.
+        model: Model id as the provider names it.
+        system: System prompt.
+        user: User prompt.
+        schema: Pydantic model the response must follow.
+        timeout_s: Timeout for one HTTP request, in seconds.
+        extra_body: Provider-specific request fields.
+
+    Returns:
+        The response text with token counts and latency.
+
+    Raises:
+        LLMError: If the API call fails or the response has no text.
+    """
+    started = time.perf_counter()
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=TEMPERATURE,
+            response_format=_json_schema_response_format(schema),
+            timeout=timeout_s,
+            extra_body=extra_body,
+        )
+    except openai.OpenAIError as err:
+        raise LLMError(f"Call failed for model '{model}': {err}") from err
+    latency_s = time.perf_counter() - started
+
+    # OpenRouter can answer HTTP 200 with an error body and no choices.
+    text = response.choices[0].message.content if response.choices else None
+    if not text:
+        raise LLMError(f"No text returned for model '{model}'.")
+    usage = response.usage
+    return LLMResponse(
+        text=text,
+        input_tokens=(usage.prompt_tokens or 0) if usage else 0,
+        # Reasoning tokens are already included in completion_tokens.
+        output_tokens=(usage.completion_tokens or 0) if usage else 0,
+        latency_s=latency_s,
+    )
+
+
 def generate_json(
     provider: str,
     model: str,
@@ -171,10 +345,14 @@ def generate_json(
 
     Raises:
         ValueError: If the provider name is unknown.
-        LLMError: If the provider is not implemented yet or the call fails.
+        LLMError: If the provider is misconfigured or the call fails.
     """
     if provider == "vertex":
         return _generate_vertex(_vertex_client(), model, system, user, schema, reasoning, timeout_s)
-    if provider in PROVIDERS_PLANNED_FOR_PHASE_3:
-        raise LLMError(f"Provider '{provider}' is not implemented until Phase 3.")
+    if provider in OPENAI_COMPATIBLE_PROVIDERS:
+        extra_body = _extra_body(provider, model, reasoning)
+        client = _openai_compatible_client(provider)
+        return _generate_openai_compatible(
+            client, model, system, user, schema, timeout_s, extra_body
+        )
     raise ValueError(f"Unknown provider '{provider}'. Use 'vertex', 'openrouter' or 'ollama'.")

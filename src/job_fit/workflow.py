@@ -10,14 +10,19 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, get_args
 
 from pydantic import ValidationError
 
-from job_fit.llm import LLMError, LLMResponse, generate_json
+from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, LLMResponse, generate_json
 from job_fit.rules import apply_rules
 from job_fit.schema import DecisionLabel, JobDecision
 
 LLMCall = Callable[..., LLMResponse]
+ReasoningSetting = Literal["default", "on", "off"]
+
+REASONING_SETTINGS: tuple[ReasoningSetting, ...] = get_args(ReasoningSetting)
+DEFAULT_REASONING: ReasoningSetting = "default"
 
 DEFAULT_PROVIDER = "vertex"
 DEFAULT_CV_PATH = Path("data/cv.md")
@@ -92,6 +97,20 @@ class DecisionResult:
     attempts: int
 
 
+def reasoning_flag(setting: ReasoningSetting) -> bool | None:
+    """Translate the command-line reasoning setting into the LLM client's switch.
+
+    Args:
+        setting: "on", "off" or "default".
+
+    Returns:
+        True, False, or None to keep the model's default.
+    """
+    if setting == "default":
+        return None
+    return setting == "on"
+
+
 def build_user_prompt(posting_text: str, cv: str) -> str:
     """Put the posting and the CV into clearly delimited blocks.
 
@@ -127,6 +146,8 @@ def decide(
     *,
     model: str,
     provider: str = DEFAULT_PROVIDER,
+    reasoning: bool | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
     llm: LLMCall | None = None,
 ) -> DecisionResult:
     """Decide APPLY / PREPARE / SKIP for one posting and one CV.
@@ -140,6 +161,9 @@ def decide(
         cv: Full text of the candidate's CV.
         model: Model id as the provider names it.
         provider: "vertex", "openrouter" or "ollama".
+        reasoning: True to enable model reasoning, False to disable it, None for the
+            model default.
+        timeout_s: Timeout for one HTTP request, in seconds.
         llm: Function with the signature of ``generate_json``. Defaults to the real
             client; tests pass a fake.
 
@@ -165,7 +189,15 @@ def decide(
     problems = ""
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        response = call_llm(provider, model, SYSTEM_PROMPT, user_prompt, JobDecision)
+        response = call_llm(
+            provider,
+            model,
+            SYSTEM_PROMPT,
+            user_prompt,
+            JobDecision,
+            reasoning=reasoning,
+            timeout_s=timeout_s,
+        )
         input_tokens += response.input_tokens
         output_tokens += response.output_tokens
         latency_s += response.latency_s
@@ -218,6 +250,26 @@ def format_result(result: DecisionResult) -> str:
     )
 
 
+def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the options that tune an LLM call; shared by the workflow and eval CLIs.
+
+    Args:
+        parser: Parser to extend.
+    """
+    parser.add_argument(
+        "--reasoning",
+        choices=REASONING_SETTINGS,
+        default=DEFAULT_REASONING,
+        help="Model reasoning: on, off, or the model's default.",
+    )
+    parser.add_argument(
+        "--timeout-s",
+        type=float,
+        default=DEFAULT_TIMEOUT_S,
+        help="Timeout for one HTTP request, in seconds.",
+    )
+
+
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     """Parse command-line arguments.
 
@@ -232,6 +284,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="Model id, as the provider names it.")
     parser.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help="Path to the CV.")
     parser.add_argument("--provider", default=DEFAULT_PROVIDER, help="LLM provider.")
+    add_llm_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -251,7 +304,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         posting_text = args.posting.read_text(encoding="utf-8")
         cv = args.cv.read_text(encoding="utf-8")
-        result = decide(posting_text, cv, model=args.model, provider=args.provider)
+        result = decide(
+            posting_text,
+            cv,
+            model=args.model,
+            provider=args.provider,
+            reasoning=reasoning_flag(args.reasoning),
+            timeout_s=args.timeout_s,
+        )
     except (OSError, ValueError, LLMError, DecisionError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

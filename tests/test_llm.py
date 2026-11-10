@@ -1,8 +1,9 @@
-"""Tests for the LLM client. No network: the Vertex client is replaced by a fake."""
+"""Tests for the LLM client. No network: provider clients are replaced by fakes."""
 
 from types import SimpleNamespace
 from typing import Any
 
+import openai
 import pytest
 from google.genai import errors as genai_errors
 
@@ -158,11 +159,209 @@ def test_generate_json_routes_vertex_to_the_vertex_client(monkeypatch: pytest.Mo
     assert len(client.models.calls) == 1
 
 
+class FakeCompletions:
+    """Stand-in for ``client.chat.completions`` that records the call."""
+
+    def __init__(self, reply: Any = None, error: Exception | None = None) -> None:
+        """Store the reply to return or the error to raise."""
+        self.reply = reply
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def create(self, **kwargs: Any) -> Any:
+        """Record the keyword arguments, then return the reply or raise the error."""
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.reply
+
+
+def _fake_chat_client(reply: Any = None, error: Exception | None = None) -> Any:
+    """Build an object shaped like an OpenAI client around FakeCompletions."""
+    completions = FakeCompletions(reply=reply, error=error)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+
+def _chat_reply(text: str | None, prompt: int = 0, completion: int = 0) -> Any:
+    """Build an object shaped like a chat completion with one choice."""
+    usage = SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion)
+    choice = SimpleNamespace(message=SimpleNamespace(content=text))
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
+def _call_chat(client: Any, extra_body: dict[str, Any] | None = None) -> LLMResponse:
+    """Call the OpenAI-compatible code path with fixed prompts and the given client."""
+    return llm._generate_openai_compatible(
+        client, MODEL, "system prompt", "user prompt", JobDecision, 30.0, extra_body or {}
+    )
+
+
+@pytest.fixture
+def pinned_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the fake model to a fake OpenRouter provider."""
+    monkeypatch.setattr(llm, "OPENROUTER_PINNED_PROVIDERS", {MODEL: "FakeHost"})
+
+
+def test_chat_response_is_mapped_to_llm_response() -> None:
+    """Text and token counts of a chat completion are passed through."""
+    client = _fake_chat_client(reply=_chat_reply('{"a": 1}', prompt=120, completion=55))
+
+    result = _call_chat(client)
+
+    assert result.text == '{"a": 1}'
+    assert (result.input_tokens, result.output_tokens) == (120, 55)
+    assert result.latency_s >= 0
+
+
+def test_chat_request_asks_for_schema_constrained_json() -> None:
+    """The request carries both prompts, a strict JSON schema, a timeout and the extras."""
+    client = _fake_chat_client(reply=_chat_reply("{}"))
+
+    _call_chat(client, extra_body={"provider": {"order": ["FakeHost"]}})
+
+    call = client.chat.completions.calls[0]
+    assert call["model"] == MODEL
+    assert call["messages"] == [
+        {"role": "system", "content": "system prompt"},
+        {"role": "user", "content": "user prompt"},
+    ]
+    assert call["temperature"] == 0.0
+    assert call["timeout"] == 30.0
+    assert call["extra_body"] == {"provider": {"order": ["FakeHost"]}}
+    json_schema = call["response_format"]["json_schema"]
+    assert call["response_format"]["type"] == "json_schema"
+    assert json_schema["strict"] is True
+    assert json_schema["schema"]["additionalProperties"] is False
+    assert next(iter(json_schema["schema"]["properties"])) == "rationale"
+
+
+def test_chat_response_without_choices_raises_llm_error() -> None:
+    """An error body that arrives with HTTP 200 and no choices is an error."""
+    client = _fake_chat_client(reply=SimpleNamespace(choices=None, usage=None))
+
+    with pytest.raises(LLMError, match="No text"):
+        _call_chat(client)
+
+
+def test_chat_response_with_empty_text_raises_llm_error() -> None:
+    """A choice without content is an error, not an empty string."""
+    client = _fake_chat_client(reply=_chat_reply(None))
+
+    with pytest.raises(LLMError, match="No text"):
+        _call_chat(client)
+
+
+def test_chat_sdk_error_is_wrapped_in_llm_error() -> None:
+    """OpenAI SDK errors surface as LLMError and keep the original as the cause."""
+    sdk_error = openai.OpenAIError("rate limited")
+    client = _fake_chat_client(error=sdk_error)
+
+    with pytest.raises(LLMError, match=MODEL) as raised:
+        _call_chat(client)
+
+    assert raised.value.__cause__ is sdk_error
+
+
+@pytest.mark.usefixtures("pinned_model")
+def test_openrouter_request_pins_the_provider_without_fallbacks() -> None:
+    """Only the pinned provider may answer, and it must honor the JSON schema."""
+    body = llm._extra_body("openrouter", MODEL, None)
+
+    assert body == {
+        "provider": {"order": ["FakeHost"], "allow_fallbacks": False, "require_parameters": True}
+    }
+
+
+@pytest.mark.usefixtures("pinned_model")
+@pytest.mark.parametrize("reasoning", [True, False])
+def test_openrouter_reasoning_switch_is_sent_in_the_body(reasoning: bool) -> None:
+    """Reasoning on and off are passed in OpenRouter's reasoning field."""
+    body = llm._extra_body("openrouter", MODEL, reasoning)
+
+    assert body["reasoning"] == {"enabled": reasoning}
+
+
+def test_openrouter_model_without_a_pinned_provider_is_rejected() -> None:
+    """An unpinned model fails before any request, instead of using any provider."""
+    with pytest.raises(LLMError, match="No pinned provider"):
+        llm._extra_body("openrouter", "vendor/unpinned-model", None)
+
+
+def test_ollama_sends_no_extra_fields() -> None:
+    """A local model needs no routing fields."""
+    assert llm._extra_body("ollama", MODEL, None) == {}
+
+
+def test_ollama_rejects_the_reasoning_switch() -> None:
+    """The reasoning switch is not silently ignored for local models."""
+    with pytest.raises(LLMError, match="not supported"):
+        llm._extra_body("ollama", MODEL, True)
+
+
+def test_missing_openrouter_key_raises_llm_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Creating the OpenRouter client without a key fails with a clear message."""
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    llm._openai_compatible_client.cache_clear()
+
+    with pytest.raises(LLMError, match="OPENROUTER_API_KEY"):
+        llm._openai_compatible_client("openrouter")
+
+    llm._openai_compatible_client.cache_clear()
+
+
+def test_ollama_client_uses_the_configured_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local endpoint comes from OLLAMA_BASE_URL."""
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:9999/v1")
+    llm._openai_compatible_client.cache_clear()
+
+    client = llm._openai_compatible_client("ollama")
+
+    assert str(client.base_url).rstrip("/") == "http://localhost:9999/v1"
+    llm._openai_compatible_client.cache_clear()
+
+
+def test_openrouter_client_uses_the_openrouter_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The OpenRouter client points at OpenRouter and is built from the key in the environment."""
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    llm._openai_compatible_client.cache_clear()
+
+    client = llm._openai_compatible_client("openrouter")
+
+    assert str(client.base_url).rstrip("/") == llm.OPENROUTER_BASE_URL
+    llm._openai_compatible_client.cache_clear()
+
+
+@pytest.mark.usefixtures("pinned_model")
 @pytest.mark.parametrize("provider", ["openrouter", "ollama"])
-def test_providers_planned_for_phase_3_raise_llm_error(provider: str) -> None:
-    """Providers that are not implemented yet fail loudly instead of silently."""
-    with pytest.raises(LLMError, match="Phase 3"):
-        generate_json(provider, MODEL, "system", "user", JobDecision)
+def test_generate_json_routes_chat_providers_to_the_chat_client(
+    provider: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public entry point uses the OpenAI-compatible client for both providers."""
+    client = _fake_chat_client(reply=_chat_reply('{"ok": true}', 5, 3))
+    requested: list[str] = []
+
+    def fake_factory(name: str) -> Any:
+        """Record which provider's client was asked for and return the fake."""
+        requested.append(name)
+        return client
+
+    monkeypatch.setattr(llm, "_openai_compatible_client", fake_factory)
+
+    result = generate_json(provider, MODEL, "system prompt", "user prompt", JobDecision)
+
+    assert result.text == '{"ok": true}'
+    assert requested == [provider]
+
+
+def test_vertex_location_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without GOOGLE_CLOUD_LOCATION the default location is reported."""
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
+
+    assert llm.vertex_location() == llm.DEFAULT_VERTEX_LOCATION
 
 
 def test_unknown_provider_raises_value_error() -> None:

@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import re
 import sys
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -27,29 +28,35 @@ from job_fit.dataset import (
     label_counts,
     load_postings,
 )
-from job_fit.llm import LLMError
+from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, vertex_location
 from job_fit.metrics import LABELS, Scores, constant_baseline, majority_label, score
 from job_fit.pricing import PRICES_CHECKED_ON, ModelPrice, call_cost_usd, price_for
 from job_fit.schema import DecisionLabel
 from job_fit.workflow import (
     DEFAULT_CV_PATH,
     DEFAULT_PROVIDER,
+    DEFAULT_REASONING,
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
     DecisionError,
     DecisionResult,
+    ReasoningSetting,
+    add_llm_arguments,
     decide,
+    reasoning_flag,
 )
 
 DecideFn = Callable[..., DecisionResult]
 ProgressFn = Callable[[int, int, "PostingResult"], None]
 Clock = Callable[[], datetime]
+SleepFn = Callable[[float], None]
 
 DEFAULT_RESULTS_DIR = Path("data/results")
 # A run of failed calls means the setup is broken (wrong project, expired login), not
 # that single postings are hard; stop instead of waiting for every timeout.
 MAX_CONSECUTIVE_LLM_ERRORS = 3
 COST_REPORT_UNIT = 100
+VERTEX_PROVIDER = "vertex"
 LABEL_COLUMN_WIDTH = 9
 
 
@@ -113,6 +120,8 @@ class EvalReport(BaseModel):
     Attributes:
         model: Model id.
         provider: LLM provider.
+        reasoning: Reasoning setting of the run: "on", "off" or the model's "default".
+        location: Vertex AI location the calls went to; None for other providers.
         started_at: Local time the run started, ISO 8601.
         dataset_path: Test set file.
         dataset_sha256: Hash of the test set file. Runs are comparable only if equal.
@@ -138,6 +147,9 @@ class EvalReport(BaseModel):
 
     model: str
     provider: str
+    # Defaults keep run files written before these fields existed loadable.
+    reasoning: ReasoningSetting = DEFAULT_REASONING
+    location: str | None = None
     started_at: str
     dataset_path: str
     dataset_sha256: str
@@ -161,7 +173,13 @@ class EvalReport(BaseModel):
 
 
 def _evaluate_one(
-    posting: Posting, cv: str, model: str, provider: str, decide_fn: DecideFn
+    posting: Posting,
+    cv: str,
+    model: str,
+    provider: str,
+    reasoning: ReasoningSetting,
+    timeout_s: float,
+    decide_fn: DecideFn,
 ) -> PostingResult:
     """Run the workflow on one posting.
 
@@ -170,6 +188,8 @@ def _evaluate_one(
         cv: Full text of the candidate's CV.
         model: Model id.
         provider: LLM provider.
+        reasoning: Reasoning setting.
+        timeout_s: Timeout for one HTTP request, in seconds.
         decide_fn: Function with the signature of ``workflow.decide``.
 
     Returns:
@@ -179,7 +199,14 @@ def _evaluate_one(
         LLMError: If the LLM call itself fails.
         DecisionError: If the model's answer stays invalid after the retry.
     """
-    result = decide_fn(posting.text, cv, model=model, provider=provider)
+    result = decide_fn(
+        posting.text,
+        cv,
+        model=model,
+        provider=provider,
+        reasoning=reasoning_flag(reasoning),
+        timeout_s=timeout_s,
+    )
     return PostingResult(
         id=posting.id,
         company=posting.company,
@@ -223,8 +250,12 @@ def evaluate(
     *,
     model: str,
     provider: str = DEFAULT_PROVIDER,
+    reasoning: ReasoningSetting = DEFAULT_REASONING,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    delay_s: float = 0.0,
     decide_fn: DecideFn = decide,
     on_progress: ProgressFn | None = None,
+    sleep: SleepFn = time.sleep,
 ) -> list[PostingResult]:
     """Run the workflow on every posting, one after the other.
 
@@ -236,9 +267,14 @@ def evaluate(
         cv: Full text of the candidate's CV.
         model: Model id.
         provider: LLM provider.
+        reasoning: Reasoning setting.
+        timeout_s: Timeout for one HTTP request, in seconds.
+        delay_s: Pause between two postings, to stay under a provider's rate limit.
+            It is not part of the measured latency.
         decide_fn: Function with the signature of ``workflow.decide``; tests pass a fake.
         on_progress: Called after each posting with its position, the total and its
             result.
+        sleep: Function that pauses for a number of seconds; tests pass a fake.
 
     Returns:
         One result per posting, in the same order.
@@ -249,8 +285,10 @@ def evaluate(
     results: list[PostingResult] = []
     consecutive_llm_errors = 0
     for position, posting in enumerate(postings, start=1):
+        if delay_s > 0 and position > 1:
+            sleep(delay_s)
         try:
-            result = _evaluate_one(posting, cv, model, provider, decide_fn)
+            result = _evaluate_one(posting, cv, model, provider, reasoning, timeout_s, decide_fn)
             consecutive_llm_errors = 0
         except DecisionError as err:
             result = _failed_result(posting, err)
@@ -290,6 +328,8 @@ def build_report(
     dataset_path: Path,
     dataset_sha256: str,
     coverage_problems: Sequence[str],
+    reasoning: ReasoningSetting = DEFAULT_REASONING,
+    location: str | None = None,
 ) -> EvalReport:
     """Compute all metrics for a finished run.
 
@@ -301,6 +341,8 @@ def build_report(
         dataset_path: Test set file.
         dataset_sha256: Hash of the test set file.
         coverage_problems: Shortfalls of the full test set.
+        reasoning: Reasoning setting of the run.
+        location: Vertex AI location the calls went to; None for other providers.
 
     Returns:
         The report to print and save.
@@ -323,7 +365,7 @@ def build_report(
 
     input_tokens = sum(result.input_tokens for result in results)
     output_tokens = sum(result.output_tokens for result in results)
-    cost_usd = call_cost_usd(model, input_tokens, output_tokens)
+    cost_usd = call_cost_usd(provider, model, input_tokens, output_tokens)
     answered = [result for result in results if result.predicted is not None]
     mean_latency_s = (
         sum(result.latency_s for result in answered) / len(answered) if answered else 0.0
@@ -333,6 +375,8 @@ def build_report(
     return EvalReport(
         model=model,
         provider=provider,
+        reasoning=reasoning,
+        location=location,
         started_at=started_at.isoformat(timespec="seconds"),
         dataset_path=dataset_path.as_posix(),
         dataset_sha256=dataset_sha256,
@@ -349,7 +393,7 @@ def build_report(
         ),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        price=price_for(model),
+        price=price_for(provider, model),
         prices_checked_on=PRICES_CHECKED_ON,
         cost_usd=cost_usd,
         cost_per_100_usd=None if cost_usd is None else cost_usd / len(results) * COST_REPORT_UNIT,
@@ -428,6 +472,23 @@ def _verdict(beats: bool) -> str:
     return "beats" if beats else "does NOT beat"
 
 
+def _describe_route(report: EvalReport) -> str:
+    """Summarize where and how the model was called.
+
+    Args:
+        report: Report of the run.
+
+    Returns:
+        Provider, location if any, and the reasoning setting, e.g.
+        "vertex, global, reasoning off".
+    """
+    parts = [report.provider]
+    if report.location:
+        parts.append(report.location)
+    parts.append(f"reasoning {report.reasoning}")
+    return ", ".join(parts)
+
+
 def format_report(report: EvalReport) -> str:
     """Render a report for the terminal.
 
@@ -439,7 +500,7 @@ def format_report(report: EvalReport) -> str:
     """
     counts = ", ".join(f"{label} {count}" for label, count in report.label_counts.items())
     lines = [
-        f"model:    {report.model} ({report.provider})",
+        f"model:    {report.model} ({_describe_route(report)})",
         f"dataset:  {report.dataset_path}, {report.dataset_size} postings ({counts})",
     ]
     lines += [f"WARNING:  incomplete test set: {problem}" for problem in report.coverage_problems]
@@ -484,10 +545,11 @@ def format_report(report: EvalReport) -> str:
 
 
 def save_report(report: EvalReport, results_dir: Path, started_at: datetime) -> Path:
-    """Write a report to ``<date>_<time>_<model>.json``.
+    """Write a report to ``<date>_<time>_<model>[_reasoning-<setting>].json``.
 
     The time is part of the name so that a second run on the same day does not
-    overwrite the first.
+    overwrite the first. A reasoning setting other than the default is part of the
+    name so that runs with reasoning on and off are easy to tell apart.
 
     Args:
         report: Report to save.
@@ -498,7 +560,8 @@ def save_report(report: EvalReport, results_dir: Path, started_at: datetime) -> 
         The path of the file written.
     """
     safe_model = re.sub(r"[^A-Za-z0-9._-]+", "-", report.model)
-    path = results_dir / f"{started_at:%Y-%m-%d_%H%M%S}_{safe_model}.json"
+    suffix = "" if report.reasoning == DEFAULT_REASONING else f"_reasoning-{report.reasoning}"
+    path = results_dir / f"{started_at:%Y-%m-%d_%H%M%S}_{safe_model}{suffix}.json"
     results_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     return path
@@ -535,6 +598,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help="Path to the CV.")
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--limit", type=int, help="Evaluate only the first N postings.")
+    add_llm_arguments(parser)
+    parser.add_argument(
+        "--delay-s",
+        type=float,
+        default=0.0,
+        help="Pause between postings in seconds, for rate-limited providers.",
+    )
     parser.add_argument(
         "--allow-incomplete",
         action="store_true",
@@ -559,10 +629,13 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
             ``--allow-incomplete``.
         EvalError: If the run is aborted.
         OSError: If a file cannot be read or written.
-        ValueError: If ``--limit`` is not positive or the CV is empty.
+        ValueError: If ``--limit`` is not positive, ``--delay-s`` is negative or the
+            CV is empty.
     """
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit must be at least 1.")
+    if args.delay_s < 0:
+        raise ValueError("--delay-s must not be negative.")
     postings = load_postings(args.data)
     coverage_problems = check_coverage(postings)
     if coverage_problems and not args.allow_incomplete:
@@ -583,6 +656,9 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
         cv,
         model=args.model,
         provider=args.provider,
+        reasoning=args.reasoning,
+        timeout_s=args.timeout_s,
+        delay_s=args.delay_s,
         decide_fn=decide_fn,
         on_progress=_print_progress,
     )
@@ -594,6 +670,8 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
         dataset_path=args.data,
         dataset_sha256=hashlib.sha256(args.data.read_bytes()).hexdigest(),
         coverage_problems=coverage_problems,
+        reasoning=args.reasoning,
+        location=vertex_location() if args.provider == VERTEX_PROVIDER else None,
     )
     print()
     print(format_report(report))

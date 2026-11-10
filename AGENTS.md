@@ -13,7 +13,7 @@ different models, and a fixed workflow vs. an agent, on a labeled test set.
 - Eval: `uv run python -m job_fit.eval --model <model> --allow-incomplete`
 
 ## Folders
-- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, agent, tools)
+- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools)
 - `data/cv.md` – candidate CV; `data/postings.jsonl` – labeled test set
 - `data/results/` – eval run outputs (git-ignored)
 - `tests/` – pytest suite; `docs/results.md` – model comparison tables

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from job_fit import eval as eval_module
 from job_fit.dataset import Posting
 from job_fit.eval import (
     EvalError,
@@ -16,13 +17,20 @@ from job_fit.eval import (
     main,
     save_report,
 )
-from job_fit.llm import LLMError
+from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError
 from job_fit.schema import JobDecision
 from job_fit.workflow import DecisionError, DecisionResult
 
 MODEL = "gemini-2.5-flash"
 CV = "CV-MARKER seven years of React Native."
 STARTED_AT = datetime(2026, 11, 10, 15, 30, 5)
+LOCATION = "test-location"
+
+
+@pytest.fixture(autouse=True)
+def fixed_vertex_location(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the tests from reading the real environment for the Vertex location."""
+    monkeypatch.setattr(eval_module, "vertex_location", lambda: LOCATION)
 
 
 def _posting(posting_id: str, label: str, note: str = "") -> Posting:
@@ -72,10 +80,26 @@ class FakeDecide:
         self.outcomes = list(outcomes)
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, posting_text: str, cv: str, *, model: str, provider: str) -> DecisionResult:
+    def __call__(
+        self,
+        posting_text: str,
+        cv: str,
+        *,
+        model: str,
+        provider: str,
+        reasoning: bool | None,
+        timeout_s: float,
+    ) -> DecisionResult:
         """Record the call, then return or raise the next canned outcome."""
         self.calls.append(
-            {"posting_text": posting_text, "cv": cv, "model": model, "provider": provider}
+            {
+                "posting_text": posting_text,
+                "cv": cv,
+                "model": model,
+                "provider": provider,
+                "reasoning": reasoning,
+                "timeout_s": timeout_s,
+            }
         )
         outcome = self.outcomes[len(self.calls) - 1]
         if isinstance(outcome, Exception):
@@ -120,8 +144,49 @@ def test_model_sees_only_the_posting_text_and_cv() -> None:
     evaluate([posting], CV, model=MODEL, decide_fn=fake)
 
     assert fake.calls == [
-        {"posting_text": "TEXT-a", "cv": CV, "model": MODEL, "provider": "vertex"}
+        {
+            "posting_text": "TEXT-a",
+            "cv": CV,
+            "model": MODEL,
+            "provider": "vertex",
+            "reasoning": None,
+            "timeout_s": DEFAULT_TIMEOUT_S,
+        }
     ]
+
+
+def test_reasoning_and_timeout_reach_the_workflow() -> None:
+    """The reasoning setting is translated to a switch and passed on with the timeout."""
+    fake = FakeDecide(_decision_result("APPLY"))
+
+    evaluate(
+        [_posting("a", "APPLY")], CV, model=MODEL, reasoning="off", timeout_s=300.0, decide_fn=fake
+    )
+
+    assert fake.calls[0]["reasoning"] is False
+    assert fake.calls[0]["timeout_s"] == 300.0
+
+
+def test_delay_pauses_between_postings_but_not_before_the_first() -> None:
+    """Three postings with a delay mean two pauses of that length."""
+    postings = [_posting("a", "APPLY"), _posting("b", "SKIP"), _posting("c", "SKIP")]
+    fake = FakeDecide(*[_decision_result("SKIP")] * 3)
+    pauses: list[float] = []
+
+    evaluate(postings, CV, model=MODEL, delay_s=4.0, decide_fn=fake, sleep=pauses.append)
+
+    assert pauses == [4.0, 4.0]
+
+
+def test_no_delay_means_no_pause() -> None:
+    """Without a delay the sleep function is never called."""
+    postings = [_posting("a", "APPLY"), _posting("b", "SKIP")]
+    fake = FakeDecide(*[_decision_result("SKIP")] * 2)
+    pauses: list[float] = []
+
+    evaluate(postings, CV, model=MODEL, decide_fn=fake, sleep=pauses.append)
+
+    assert pauses == []
 
 
 def test_failed_posting_is_recorded_and_the_run_continues() -> None:
@@ -292,6 +357,53 @@ def test_save_report_names_the_file_by_date_time_and_model(tmp_path: Path) -> No
     assert saved["results"][0]["predicted"] == "APPLY"
 
 
+def test_save_report_marks_a_non_default_reasoning_setting_in_the_name(tmp_path: Path) -> None:
+    """Runs with reasoning on or off get a suffix, so they are not mistaken for each other."""
+    results = evaluate(
+        [_posting("a", "APPLY")], CV, model=MODEL, decide_fn=FakeDecide(_decision_result("APPLY"))
+    )
+    report = build_report(
+        results,
+        model=MODEL,
+        provider="vertex",
+        started_at=STARTED_AT,
+        dataset_path=Path("data/postings.jsonl"),
+        dataset_sha256="abc",
+        coverage_problems=[],
+        reasoning="off",
+        location=LOCATION,
+    )
+
+    path = save_report(report, tmp_path, STARTED_AT)
+
+    assert path.name == f"2026-11-10_153005_{MODEL}_reasoning-off.json"
+    assert f"({'vertex'}, {LOCATION}, reasoning off)" in format_report(report)
+
+
+def test_local_model_run_costs_nothing() -> None:
+    """A model served by Ollama has a price of zero, not an unknown price."""
+    results = evaluate(
+        [_posting("a", "APPLY")],
+        CV,
+        model="any-local-model",
+        provider="ollama",
+        decide_fn=FakeDecide(_decision_result("APPLY")),
+    )
+
+    report = build_report(
+        results,
+        model="any-local-model",
+        provider="ollama",
+        started_at=STARTED_AT,
+        dataset_path=Path("data/postings.jsonl"),
+        dataset_sha256="abc",
+        coverage_problems=[],
+    )
+
+    assert report.cost_usd == 0.0
+    assert report.location is None
+
+
 def _write_inputs(tmp_path: Path, labels: list[str]) -> list[str]:
     """Write a test set and a CV, and return the CLI arguments pointing at them."""
     data = tmp_path / "set.jsonl"
@@ -384,6 +496,31 @@ def test_main_limit_evaluates_only_the_first_postings(tmp_path: Path) -> None:
     assert [call["posting_text"] for call in fake.calls] == ["TEXT-p-0", "TEXT-p-1", "TEXT-p-2"]
     saved = json.loads(next((tmp_path / "results").iterdir()).read_text(encoding="utf-8"))
     assert saved["dataset_size"] == 3
+
+
+def test_main_records_reasoning_and_location_in_the_run_file(tmp_path: Path) -> None:
+    """The run file says which reasoning setting and Vertex location produced it."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--reasoning", "on", "--timeout-s", "90"]
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+
+    exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    assert exit_code == 0
+    assert fake.calls[0]["reasoning"] is True
+    assert fake.calls[0]["timeout_s"] == 90.0
+    run_file = tmp_path / "results" / f"2026-11-10_153005_{MODEL}_reasoning-on.json"
+    saved = json.loads(run_file.read_text(encoding="utf-8"))
+    assert (saved["reasoning"], saved["location"]) == ("on", LOCATION)
+
+
+def test_main_rejects_a_negative_delay(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A negative pause is a usage error."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--delay-s", "-1"]
+
+    exit_code = main(argv, decide_fn=FakeDecide(), clock=lambda: STARTED_AT)
+
+    assert exit_code == 1
+    assert "--delay-s must not be negative" in capsys.readouterr().err
 
 
 def test_main_rejects_a_non_positive_limit(

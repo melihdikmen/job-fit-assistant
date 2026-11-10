@@ -7,9 +7,9 @@ from typing import Any
 import pytest
 
 from job_fit import workflow
-from job_fit.llm import LLMResponse
+from job_fit.llm import DEFAULT_TIMEOUT_S, LLMResponse
 from job_fit.schema import JobDecision
-from job_fit.workflow import DecisionError, build_user_prompt, decide, main
+from job_fit.workflow import DecisionError, build_user_prompt, decide, main, reasoning_flag
 
 MODEL = "fake-model"
 POSTING = "Senior React Native engineer wanted."
@@ -25,11 +25,27 @@ class FakeLLM:
         self.calls: list[dict[str, Any]] = []
 
     def __call__(
-        self, provider: str, model: str, system: str, user: str, schema: type
+        self,
+        provider: str,
+        model: str,
+        system: str,
+        user: str,
+        schema: type,
+        *,
+        reasoning: bool | None,
+        timeout_s: float,
     ) -> LLMResponse:
         """Record the call and return the next canned answer with fixed usage."""
         self.calls.append(
-            {"provider": provider, "model": model, "system": system, "user": user, "schema": schema}
+            {
+                "provider": provider,
+                "model": model,
+                "system": system,
+                "user": user,
+                "schema": schema,
+                "reasoning": reasoning,
+                "timeout_s": timeout_s,
+            }
         )
         text = self.texts[len(self.calls) - 1]
         return LLMResponse(text=text, input_tokens=100, output_tokens=20, latency_s=0.5)
@@ -88,6 +104,49 @@ def test_llm_receives_prompts_schema_and_model() -> None:
     assert POSTING in call["user"]
     assert CV in call["user"]
     assert call["schema"] is JobDecision
+
+
+def test_reasoning_and_timeout_default_to_the_model_and_client_defaults() -> None:
+    """Without options the model keeps its own reasoning default and the usual timeout."""
+    llm = FakeLLM(_answer())
+
+    decide(POSTING, CV, model=MODEL, llm=llm)
+
+    assert llm.calls[0]["reasoning"] is None
+    assert llm.calls[0]["timeout_s"] == DEFAULT_TIMEOUT_S
+
+
+def test_reasoning_and_timeout_are_passed_to_the_llm() -> None:
+    """The reasoning switch and the timeout reach the LLM call unchanged."""
+    llm = FakeLLM(_answer())
+
+    decide(POSTING, CV, model=MODEL, reasoning=False, timeout_s=300.0, llm=llm)
+
+    assert llm.calls[0]["reasoning"] is False
+    assert llm.calls[0]["timeout_s"] == 300.0
+
+
+@pytest.mark.parametrize(("setting", "expected"), [("on", True), ("off", False), ("default", None)])
+def test_reasoning_setting_maps_to_the_llm_switch(setting: str, expected: bool | None) -> None:
+    """The command-line words translate to True, False and "leave the default"."""
+    assert reasoning_flag(setting) is expected
+
+
+def test_cli_passes_reasoning_and_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--reasoning and --timeout-s on the command line reach the LLM call."""
+    posting_file = tmp_path / "posting.txt"
+    cv_file = tmp_path / "cv.md"
+    posting_file.write_text(POSTING, encoding="utf-8")
+    cv_file.write_text(CV, encoding="utf-8")
+    fake = FakeLLM(_answer())
+    monkeypatch.setattr(workflow, "generate_json", fake)
+    argv = ["--posting", str(posting_file), "--cv", str(cv_file), "--model", MODEL]
+
+    exit_code = main([*argv, "--reasoning", "on", "--timeout-s", "90"])
+
+    assert exit_code == 0
+    assert fake.calls[0]["reasoning"] is True
+    assert fake.calls[0]["timeout_s"] == 90.0
 
 
 def test_invalid_answer_is_retried_once_and_usage_is_summed() -> None:
