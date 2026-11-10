@@ -1,0 +1,20 @@
+Founding Engineer | Uplico
+İstanbul, Türkiye · İş yerinde
+---
+Uplico, Agentic HR Operating System platformu. Ürünlerimizi kendi LLM ve karar modellerimizle, hem bulutta hem müşterinin kendi sunucusunda çalıştırıyoruz.
+Rol: Founding Engineer arıyoruz. Doğrudan kurucularla çalışacak, bir ürün alanını uçtan uca sahiplenecek ve mühendisliğin nasıl ölçekleneceğini birlikte şekillendireceksin.
+Ne yapacaksın
+• İşe alım ve yetenek yönetimi platformlarını geliştirmek; çok kiracılı veri modeli, raporlama ve kurumsal entegrasyonlar
+• Gerçek zamanlı ses ve video: telefon ve avatar üzerinden AI mülakat deneyimleri; düşük gecikmeli konuşma akışlarını ölçeklemek
+• Agent sistemleri: İK ekiplerinin işlerini yürüten agent'lar; güvenilirlik, yetki sınırları ve değerlendirme
+• Kendi LLM ve karar modellerini eğitmek ve değerlendirmek
+• AWS üzerindeki bulut altyapısını işletmek; ürünleri müşterinin kendi ortamında (on-prem) çalıştırmak
+Aradığımız
+• Üretimde gerçek kullanıcısı olan sistemleri uçtan uca kurmuş ve işletmiş
+• TypeScript veya Python'da güçlü, diğerinde çalışmaya istekli
+• AWS servislerine hakim, üretim altyapısını kendi kurup işletebilen
+• Veri modelleme ve dağıtık sistemlerde sağlam temel
+• LLM tabanlı bir özelliği üretime almış ve çıktısını ölçmüş
+• Şu alanların en az birinde derin: gerçek zamanlı ses ve video, ML mühendisliği, agent sistemleri, altyapı ve on-prem, B2B ürün mühendisliği
+• KVKK ve güvenlik konularında sorumluluk alan
+Artı: Erken aşama girişim deneyimi, Türkçe NLP, AI araçlarını günlük işte kullanmak

@@ -1,0 +1,16 @@
+AI Engineer, Performance Marketing | Dream Games
+İstanbul, Türkiye · İş yerinde
+---
+We are looking for a passionate AI Engineer to join our performance marketing team. You will build generative AI pipelines and agentic systems for creative production: creative ideation, image and video generation, automated creative pipelines, and the tooling around them.
+Responsibilities
+Building and maintaining AI powered features and agentic workflows for creative production
+Contributing to systems that generate ad creatives, including interactive playables, by combining code generation and multimodal asset generation
+Working with creative strategists to turn their craft into repeatable, scaled workflows
+Developing evaluation pipelines for creative output, including quality checks and human-in-the-loop review
+Requirements
+Computer engineering (or similar) background with a genuine creative eye
+Proficiency in Python and hands on experience building agentic workflows, LLM chains, and multimodal model calls
+Experience with generative AI, such as diffusion models and image/video generation
+Familiarity with RAG, function calling, and vector databases
+Deep interest in state-of-the-art AI
+Passion and interest in games

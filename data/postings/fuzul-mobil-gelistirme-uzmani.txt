@@ -1,0 +1,17 @@
+Mobil Geliştirme Uzmanı | Fuzul Holding (Fuzul Katılım Bankası)
+İstanbul, Türkiye · İş yerinde
+---
+Bankamızın mobil bankacılık uygulamalarının geliştirilmesi, mevcut özelliklerinin iyileştirilmesi ve kullanıcı deneyiminin güçlendirilmesi süreçlerinde görev alacak bir "Mobil Geliştirme Uzmanı" arıyoruz.
+Görev ve Sorumluluklar
+Flutter kullanarak mobil bankacılık uygulamalarının geliştirilmesi
+Bankacılık ürün ve hizmetlerinin mobil kanallara taşınması
+Backend servisleri ve API'lerle entegrasyon
+Performans, kararlılık ve kullanılabilirlik iyileştirmeleri
+UX/UI tasarımlarını mobil ekranlara dönüştürmek
+Hata analizi ve kök neden çözümü
+Birim testleri; mobil uygulama güvenliği, kimlik doğrulama
+Sürüm hazırlama, test ve yayınlama süreçlerine destek
+Aranan Nitelikler
+Bilgisayar/Yazılım/Elektrik-Elektronik Mühendisliği veya ilgili bölümlerden mezun
+Mobil yazılım geliştirme alanında en az 3 yıl deneyim
+Flutter ile mobil uygulama geliştirme deneyimi

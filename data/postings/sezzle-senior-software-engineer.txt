@@ -1,0 +1,15 @@
+Senior Software Engineer (Turkey) | Sezzle
+İstanbul, Türkiye · Uzaktan
+---
+The salary range for this role is $5,000 - $9,500 per month (Gross in USD).
+What You'll Do
+Design software applications and features in Golang and React
+Help build out a distributed architecture
+Deliver high quality features; lead small development teams as needed; mentor teammates
+What We Look For
+At least 7 years of full-stack software engineering experience
+Experience with building and serving REST APIs using Go (preferably) and Java, Python or a similar language
+Experience working in a distributed, cloud-based architecture (transactional outboxes, RabbitMQ, SQS, Kafka)
+Demonstrated experience working with Claude or equivalent LLM tools is required
+Bachelor's degree in Computer Science or related
+Preferred: SQL RDBMS via ORM, Prometheus/NewRelic/Datadog, CI/CD, Kubernetes

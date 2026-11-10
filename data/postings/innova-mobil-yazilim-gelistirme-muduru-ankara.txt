@@ -1,0 +1,17 @@
+Mobil Yazılım Geliştirme Müdürü / Ankara | İnnova Bilişim (Türk Telekom Grubu)
+Ankara, Türkiye (ODTÜ Teknokent) · İş yerinde
+---
+Ankara/ODTÜ Teknokent ofisimizde çalışabilecek "Mobil Yazılım Geliştirme Müdürü" arıyoruz.
+Genel Yetkinlikler
+Kod kalitesi, performans, güvenlik ve yazılım geliştirme standartlarını belirlemek ve uygulanmasını sağlamak
+Teknoloji seçimleri ve mimari karar süreçlerinde aktif rol almak, teknik borçları azaltmak
+Mobil geliştirme ekibinin yönetimini üstlenmek; ekip üyelerinin gelişimini, performansını ve motivasyonunu desteklemek
+İşe alım, mentorluk ve teknik yetkinlik geliştirme süreçlerine katkı
+Proje planlama, iş önceliklendirme, kaynak ve efor yönetimi
+Tasarım, backend ve diğer paydaş ekiplerle koordinasyon
+Gerektiğinde yazılım geliştirmeye doğrudan teknik katkı
+Büyük ölçekli ve yüksek trafikli mobil uygulama projelerinde görev almış
+Mikroservis mimarileriyle entegre mobil uygulamalarda deneyimli
+Unit Test ve UI Test otomasyonu
+Firebase, Crashlytics ve Analytics
+App Store ve Google Play yayın süreçleri

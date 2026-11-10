@@ -1,0 +1,27 @@
+Mobile Backend & Software Architecture Senior Developer | AgeSA Hayat ve Emeklilik
+İstanbul, Türkiye · Hybrid
+---
+Müşterilerimizin dijital deneyimlerinde kritik rol oynayan mobil uygulamamızın Backend ve mimari süreçlerine yön verecek bir Kıdemli Yönetmen arıyoruz.
+Genel Nitelikler
+• Bilgisayar/Yazılım Mühendisliği veya ilgili bölümlerden mezun
+• Yazılım geliştirme alanında en az 8 yıl deneyim
+• Teknik liderlik, çözüm mimarisi, teknik yönlendirme veya takım liderliği deneyimi
+• Java ve Spring Boot ile kurumsal ölçekli uygulama geliştirme ve yazılım mimarisinde ileri seviye bilgi
+• Microservice mimarileri ve RESTful API tasarımı
+• BFF (Backend for Frontend), API Gateway, Authentication ve Session Management gibi mobil backend mimarileri
+• Spring Batch, Kafka ve benzeri kuyruk teknolojileri ile asenkron sistemler
+• SonarQube, Fortify ve benzeri kod kalitesi ve güvenlik analiz araçları
+• Dynatrace, Instana veya benzeri APM araçları
+• Push Notification süreçleri ve mobil kullanıcı etkileşimi sağlayan backend yapıları
+• Oracle, MongoDB, Elasticsearch ve Redis
+• Docker, Kubernetes ve bulut tabanlı mimariler
+• CI/CD, Jenkins, Bitbucket
+• Tercihen React veya benzeri frontend teknolojileri hakkında temel bilgi
+• Github Copilot ve benzeri yapay zeka destekli geliştirme araçlarını etkin kullanabilen
+• Agile/Scrum deneyimi
+• İyi seviyede İngilizce bilgisine sahip
+İş Tanımı
+• AgeSA Mobil uygulamasına hizmet veren backend sistemlerinin mimari tasarımı, geliştirilmesi ve sürdürülebilirliği
+• Mobil backend mimarisi, teknik standartlar ve tasarım prensiplerinin belirlenmesine liderlik
+• Mikroservis tabanlı sistemlerin analiz, tasarım ve geliştirmesi
+• Code review süreçlerinin yürütülmesi, yazılım standartlarının oluşturulması

@@ -1,0 +1,14 @@
+Mobil Geliştirme Mimarı | Fuzul Holding (Fuzul Katılım Bankası)
+İstanbul, Türkiye · İş yerinde
+---
+Bankamızın mobil bankacılık uygulamalarının teknik mimarisini oluşturacak, mobil geliştirme süreçlerine yön verecek ve güvenli, sürdürülebilir, yüksek performanslı dijital bankacılık çözümlerinin geliştirilmesine liderlik edecek bir "Mobil Geliştirme Mimarı" arıyoruz.
+Görev ve Sorumluluklar
+Mobil bankacılık uygulamalarının teknik mimarisini tasarlamak, mimari standartları belirlemek
+Flutter teknolojisiyle geliştirilen mobil uygulamaların mimari yapısını oluşturmak
+Performans, güvenlik, ölçeklenebilirlik ve kullanıcı deneyimi
+İş birimleri, ürün ekipleri, UX/UI ve backend ekipleriyle koordineli çalışmak
+Mobil–backend entegrasyon mimarisi ve API standartları
+Kimlik doğrulama, oturum yönetimi, veri güvenliği; bankacılık gerekliliklerine uygun güvenli yazılım geliştirme
+Kod kalitesi, test otomasyonu, kod inceleme standartları
+Sürüm yönetimi, yayınlama ve CI/CD
+Mobil geliştirme ekibine teknik rehberlik sağlamak

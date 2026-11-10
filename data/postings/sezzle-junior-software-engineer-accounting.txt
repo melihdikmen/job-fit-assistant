@@ -1,0 +1,14 @@
+Junior Software Engineer with Accounting Experience | Sezzle
+İstanbul, Türkiye · Uzaktan
+---
+The salary range for this role is $1,500 - $4,000 per month (Gross in USD).
+What You'll Do
+Enhance and maintain software solutions for financial processes; leverage accounting background to improve automation and reconciliation workflows.
+What We Look For
+Prior experience as an accountant or financial analyst
+Solid understanding of reconciliation, reporting, and compliance
+Proficient in at least one programming language (Python, Java, Go); MySQL or PostgreSQL
+Backend API development
+Demonstrated experience working with Claude or equivalent LLM tools
+Bachelor's degree in Accounting, Computer Science, or a related field
+Stack: Golang, TypeScript, Python; React and React Native; MySQL, PostgreSQL

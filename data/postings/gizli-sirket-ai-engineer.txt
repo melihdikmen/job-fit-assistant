@@ -1,0 +1,24 @@
+Artificial Intelligence Engineer | Gizli Şirket
+İstanbul, Türkiye · Uzaktan
+---
+We are looking for an Artificial Intelligence Engineer who will take an active role in AI, data analytics, and prediction projects, and who can develop end-to-end AI solutions without relying on RPA tools.
+Minimum of 5 years of experience in data engineering and/or software development.
+Responsibilities
+Perform data collection, cleaning, feature engineering, and analysis
+Design and work with ETL / ELT processes and data pipelines
+Select appropriate models for regression, classification, time series forecasting, and anomaly detection
+Train, test, validate, and evaluate the performance of models
+Design and develop LLM-based AI and automation solutions
+Build solutions for document understanding, text processing, and intelligent classification using NLP, LLM, and RAG approaches
+Integrate LLM and ML models into enterprise systems via APIs, services, and event-driven architectures
+Apply MLOps practices, including model versioning, monitoring, drift detection, and retraining workflows
+Technical Qualifications
+Advanced development experience with Python
+Hands-on experience designing and developing LLM-based AI solutions
+Experience with OCR, document processing, or unstructured data pipelines
+Experience working with SQL and NoSQL databases
+Strong knowledge of NumPy, Pandas, SciPy, and related ML / NLP libraries
+Solid understanding of supervised and unsupervised learning and predictive modeling
+Experience with regression, classification, clustering, anomaly detection, and time series analysis
+Knowledge of model evaluation metrics (Accuracy, Precision, Recall, F1, RMSE)
+Awareness of data privacy regulations (KVKK / GDPR)

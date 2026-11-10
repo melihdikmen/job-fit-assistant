@@ -1,0 +1,16 @@
+Senior Full Stack Engineer – JS/TS & C++ with Mobile Expertise | Randstad Türkiye
+İstanbul, Türkiye · İş yerinde
+---
+Key Responsibilities:
+• Design, develop, and maintain full stack solutions—from frontend interfaces (JS/TS, React) to backend services.
+• Build tooling, SDKs, and frameworks that support cross-platform mobile development.
+• Architect clean, modular, and reusable components and services.
+• Propose design approaches for technical interfaces with customers.
+• Investigate platform-level issues and contribute fixes across the stack.
+Required Qualifications:
+• 5+ years of professional software development experience, with strong experience in JavaScript/TypeScript and full stack development.
+• Strong professional experience with C++, including debugging and working with existing C++ codebases.
+• Experience with mobile application or mobile platform development.
+• Solid understanding of backend development.
+• Familiarity with CI/CD workflows, Git, and testing tools.
+Preferred: developer tooling, SDKs or plugin systems; mobile build pipelines.

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 0 – Setup | ✅ | see `git log --grep phase-0` | uv project, ruff + pytest configured, 1 smoke test |
 | 1 – Structured output | ✅ | see `git log --grep phase-1` | `gemini-2.5-flash` on Vertex; 3 samples run live; 75 tests |
-| 2 – Test set and eval | ⬜ | | |
+| 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ⬜ | | |
 | 4 – Agent | ⬜ | | |
 | 5 – Harden | ⬜ | | |
@@ -25,8 +25,6 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
 | D11 | Newer Gemini models (3.x) answer only in the `global` location; `.env` uses `us-central1`, where only `gemini-2.5-flash` answered. Switch `GOOGLE_CLOUD_LOCATION` to `global`? | Phase 3 | Yes, before picking the 3 cloud models |
-| D5 | A posting whose call fails even after retry: how is it scored in eval? | Phase 2 | Count as wrong, with the worst cost in its row; report the count separately |
-| D6 | Weighted error: total over the set, or mean per posting? | Phase 2 | Report both; compare models on the mean |
 | D7 | Local machine RAM / GPU VRAM for Ollama? | Phase 3 | Check before picking the local model |
 | D8 | Is Claude enabled in Vertex Model Garden for your project? | Phase 3 | If not, use OpenRouter for it |
 
@@ -43,6 +41,22 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   Everything else stays English.
 - D10 (2026-11-10): the candidate supplies 3 real postings as text files in
   `data/samples/` (format in `data/samples/README.md`).
+
+- D5 (2026-11-10): a posting whose call fails even after the retry counts as wrong and is
+  charged the worst cost of its actual row; the number of failures is reported separately.
+- D6 (2026-11-10): weighted error is reported as total and as mean per posting; models
+  are compared on the mean.
+- D12 (2026-11-10): `data/postings.jsonl` is committed. The `note` field carries no
+  private remarks.
+- D13 (2026-11-10): rows are added with `python -m job_fit.dataset add`; `postings.jsonl`
+  stays the single source of truth.
+- D14 (2026-11-10): the report prints all three constant predictors, majority marked.
+
+- D15 (2026-11-10): Phase 2 is closed with 3 PREPARE postings instead of 5. Eval runs on
+  this set need `--allow-incomplete` until two more PREPARE postings are added; adding
+  them changes the dataset hash, so earlier runs must be repeated to stay comparable.
+- D16 (2026-11-10): `data/postings/_labels.txt` (the candidate's working notes) is
+  git-ignored; the posting texts and `postings.jsonl` are committed.
 
 ## What the candidate does (Claude cannot)
 
@@ -206,23 +220,199 @@ tokens and latency are printed, `rules.py` has ≥ 5 passing tests.
 
 ---
 
-## Phase 2 – Test set and evaluation (roadmap)
+## Phase 2 – Test set and evaluation (done)
 
-- `data/postings.jsonl` in the PROCESS.md format, ≥ 20 postings, ≥ 5 per label,
-  labeled by the candidate.
-- Dataset validation (unique ids, valid labels, balance) runs at the start of every eval
-  and fails loudly.
-- `eval.py`, `uv run python -m job_fit.eval --model <model> [--provider ...] [--limit N]`:
-  - accuracy, 3×3 confusion matrix, weighted error (cost matrix from PROCESS.md, D6)
-  - majority-label baseline printed next to the model
-  - total tokens, estimated cost (USD) from a dated price table, mean latency
-  - list of wrong postings with rationale and which rules fired
-  - also scores the LLM's decision *before* rules, to show what the rules add
-  - saves `data/results/<date>_<model>.json`
-- Failed postings handled per D5.
-- Tests for metric functions on hand-made inputs (no LLM).
+Source: [PROCESS.md §5 Phase 2](PROCESS.md#phase-2--test-set-and-evaluation)
 
-**Done when:** one command prints all metrics including the baseline.
+### Before the live run (candidate)
+- [x] Answer D5, D6, D12, D13, D14 (all decided as proposed, see Decided).
+- [ ] Collect ≥ 20 real postings and label each one yourself, ≥ 5 per label. The label
+      is the decision *you* would make with the hard rules included (an on-site Izmir
+      role is `SKIP` even if the stack fits), because eval scores the final decision.
+- [ ] Label before looking at any model output, so the model cannot anchor the labels.
+      The 3 Phase 1 samples may be reused; their model outputs are already known, so
+      label them from the posting alone.
+- [ ] Include hard cases on purpose: borderline APPLY/PREPARE, a good stack in a blocked
+      city, a junior role with a matching stack, a posting with no location.
+
+Steps 1–7 need no dataset and no network; they can be built and tested while the
+postings are being collected. Steps 8–9 need the labeled set.
+
+### Module layout
+PROCESS.md names only `eval.py`. Pure logic is split out so it can be tested without
+files or an LLM ([docs/python-style.md](docs/python-style.md): logic pure, I/O at the edges):
+
+| Module | Job | I/O |
+|---|---|---|
+| `dataset.py` | `Posting` model, load and validate `postings.jsonl`, `add` helper CLI | files |
+| `metrics.py` | accuracy, confusion matrix, weighted error, baselines | none (pure) |
+| `pricing.py` | dated list-price table, cost of a call | none (pure) |
+| `eval.py` | run `decide` over the set, build the report, save the run, CLI | files, LLM |
+
+### Steps
+1. [x] `dataset.py`
+       - `Posting` (Pydantic, `extra="forbid"`): `id`, `company`, `role`, `text`,
+         `label: DecisionLabel`, `note: str = ""`.
+       - `load_postings(path) -> list[Posting]`. Structural problems are fatal and name
+         the line number: invalid JSON, missing field, unknown label, empty `text`,
+         duplicate `id`. Raises `DatasetError`.
+       - `check_coverage(postings) -> list[str]`: fewer than 20 postings or fewer than 5
+         of a label. Fatal in eval unless `--allow-incomplete` is passed (needed for
+         smoke runs before the set is complete); the shortfall is stored in the run file.
+       - Helper (D13): `uv run python -m job_fit.dataset add --id <id> --company <c>
+         --role <r> --label <L> --file <posting.txt> [--note <n>]` appends one escaped
+         row and refuses a duplicate id. `... dataset check` prints counts per label.
+       - Only `text` is ever sent to the model. `label`, `note`, `company` and `role`
+         stay on the eval side, otherwise the answer leaks into the prompt.
+2. [x] `metrics.py` – pure functions over `(actual, predicted)` label pairs:
+       - `LABELS = ("APPLY", "PREPARE", "SKIP")`, `ERROR_COSTS` exactly as the PROCESS.md
+         table (APPLY→SKIP 3, PREPARE→SKIP 2, everything else off-diagonal 1).
+       - `accuracy`, `confusion_matrix` (3×3, rows actual, columns predicted),
+         `weighted_error` returning total and mean per posting (D6).
+       - A failed posting (D5) is passed as prediction `None`: counted wrong for
+         accuracy, charged the worst cost of its actual row (APPLY 3, PREPARE 2,
+         SKIP 1), left out of the 3×3 matrix and reported as a separate count.
+       - `majority_label` (tie broken by `LABELS` order, so it is deterministic) and
+         `constant_baseline(actual, label)`; the report shows the majority baseline and,
+         per D14, the other two constant predictors.
+       - The baseline is computed on the same set it is scored on. With no training
+         step there is nothing to hold out; this is stated in the report.
+3. [x] `pricing.py`
+       - `PRICES_USD_PER_MILLION_TOKENS: dict[str, ModelPrice]` (input, output) with a
+         `PRICES_CHECKED_ON` date. Starts with `gemini-2.5-flash` only; the price is
+         read from the official Vertex pricing page at implementation time, not from
+         memory. Thinking tokens are billed as output, which matches how `llm.py`
+         already counts them.
+       - `call_cost_usd(model, input_tokens, output_tokens) -> float | None`. An
+         unknown model returns `None`: eval still runs and prints "price unknown"
+         instead of a made-up number or a crash after the calls were paid for.
+4. [x] `eval.py` – runner
+       - `evaluate(postings, cv, *, model, provider, decide_fn=decide) -> EvalRun`;
+         `decide_fn` is injectable so tests use a fake (no network).
+       - Sequential, one progress line per posting (`[7/20] <id> label=APPLY
+         predicted=SKIP 15.2s`). About 20 × 16 s ≈ 5 min on `gemini-2.5-flash`.
+       - `LLMError` / `DecisionError` on one posting is caught and recorded (D5); the
+         run continues. Three consecutive `LLMError`s abort the run with a clear
+         message (wrong project, expired login), so a broken setup does not burn
+         20 timeouts.
+       - Per posting record: `id`, `label`, `predicted`, `llm_decision` (before rules),
+         `fired_rules`, tokens, latency, attempts, `rationale`, `error`.
+5. [x] `eval.py` – report (printed to the terminal, built by a pure `format_report`)
+       - dataset: size and count per label
+       - accuracy; 3×3 confusion matrix; weighted error total and mean; failed count
+       - the same three numbers for the LLM's decision *before* rules, to show what
+         the rules add or break
+       - baselines next to the model, and one verdict line: beats / does not beat the
+         majority baseline on accuracy and on mean weighted error
+       - total input and output tokens, estimated cost (USD) for the run and per 100
+         postings (the unit of the Phase 3 table), mean latency
+       - wrong postings one by one: id, company, role, label → predicted, LLM decision,
+         rules fired, candidate's `note`, rationale
+6. [x] `eval.py` – save and CLI
+       - `uv run python -m job_fit.eval --model <model> [--provider vertex]
+         [--data data/postings.jsonl] [--cv data/cv.md] [--limit N] [--allow-incomplete]`
+       - Saves `data/results/<YYYY-MM-DD>_<HHMMSS>_<model>.json` (git-ignored). The time
+         is added to the PROCESS.md name so a second run on the same day does not
+         overwrite the first; `/` and `:` in model ids are replaced. The clock is
+         injected for tests.
+       - File content: model, provider, timestamp, SHA-256 of the dataset file and of
+         the system prompt (two runs are comparable only if both match), prices used,
+         all metrics, baselines, per-posting records. No CV text, no posting text.
+       - Exit code 0 when the run completes, 1 on a dataset or configuration error.
+         Losing to the baseline is a result, not an error.
+7. [x] Tests (no network, no real LLM, no real clock)
+       - `test_dataset.py`: valid file loads; bad JSON, missing field, unknown label,
+         empty text and duplicate id each rejected with the line number; coverage
+         shortfalls reported; `add` writes a row that loads back and refuses a
+         duplicate id.
+       - `test_metrics.py`: hand-made inputs with known answers: perfect predictions;
+         each cell of the cost matrix (parametrized); confusion-matrix orientation;
+         failed posting charged the worst cost and excluded from the matrix; majority
+         label and its tie-break; constant baselines; empty input rejected.
+       - `test_pricing.py`: known model cost computed; unknown model returns `None`.
+       - `test_eval.py`: fake `decide_fn` → expected metrics; one failing posting does
+         not stop the run; three consecutive `LLMError`s abort; `--limit` respected;
+         incomplete set rejected without `--allow-incomplete`; run file written with
+         the expected name and keys and without the CV text; `main` exit codes.
+8. [~] Dataset in place: 21 postings (APPLY 6, PREPARE 3, SKIP 12). `dataset check`
+       still reports "3 postings labeled PREPARE, need at least 5"; the run below used
+       `--allow-incomplete`. Accepted as is by the candidate (D15).
+9. [x] Live run: `--limit 3` smoke run, then the full set (results below).
+10. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show output.
+11. [x] Update `AGENTS.md` (folder line), commit `phase-2: test set and evaluation`,
+        update the status table.
+
+### Live run results (2026-11-10, `gemini-2.5-flash`, `us-central1`)
+
+Run file: `data/results/2026-11-10_220918_gemini-2.5-flash.json` (dataset SHA-256
+`296805a932ba…`, prompt SHA-256 `a1bff7049339…`). 21 postings, no failed calls, no
+schema retries.
+
+| | Accuracy | Weighted error (total) | Mean per posting |
+|---|---|---|---|
+| Model, final (after rules) | 66.7% (14/21) | 10 | 0.48 |
+| Model, LLM before rules | 61.9% (13/21) | 11 | 0.52 |
+| Always SKIP (majority baseline) | 57.1% | 24 | 1.14 |
+| Always APPLY | 28.6% | 15 | 0.71 |
+| Always PREPARE | 14.3% | 18 | 0.86 |
+
+Confusion matrix (rows actual, columns predicted):
+
+| | APPLY | PREPARE | SKIP |
+|---|---|---|---|
+| **APPLY** | 3 | 2 | 1 |
+| **PREPARE** | 0 | 2 | 1 |
+| **SKIP** | 1 | 2 | 9 |
+
+Tokens 47,570 in / 47,326 out; cost $0.1326 for the run, $0.63 per 100 postings (list
+price); mean latency 14.8 s per posting.
+
+### Findings to carry into Phase 3
+- The model beats the majority baseline on both measures, but the margin on accuracy is
+  2 postings (14 vs. 12 of 21). On weighted error the harder rival is "always APPLY"
+  (0.71 vs. 0.48), about 5 cost points over 21 postings. Treat both as weak evidence.
+- Errors lean cautious: 4 of 7 are a good or preparable job rated one step too low
+  (APPLY→PREPARE twice, APPLY→SKIP for Miny, PREPARE→SKIP for Getir). Miny is the one
+  cost-3 error, the same as in Phase 1: a single missing skill (Go) outweighs a
+  matching main stack.
+- The opposite error also occurs: 3 SKIP postings were rated APPLY or PREPARE where the
+  candidate sees a hard requirement (Go backend 7+ years, accounting background, Flutter
+  architect depth). The model treats these as closable gaps.
+- Rules fired on 3 postings and changed 1 outcome: Kaslıfilozof (Bursa, on-site) went
+  from the LLM's PREPARE to SKIP, which is where the 61.9% → 66.7% comes from. The
+  junior and intern postings were already SKIP before the rule.
+- Output tokens equal input tokens (about 2,250 per posting) and are 89% of the cost;
+  thinking is the lever to test in Phase 3 (reasoning off vs. on).
+- No prompt changes were made after seeing these results; this run is the reference.
+
+### Caveats on the test set
+- The labels came from a suggested list (`data/postings/_labels.txt`) that the candidate
+  accepted as a whole on 2026-11-10 rather than writing each one independently.
+- Posting texts under `data/postings/` are condensed (600–3,500 characters), shorter than
+  the postings as published.
+- PREPARE has 3 examples, so the PREPARE row of the matrix says very little.
+- A failed posting's tokens are not counted (`decide` raises without returning usage);
+  it did not matter in this run because nothing failed.
+
+**Done when:** `uv run python -m job_fit.eval --model <model>` prints all metrics in one
+command, including the baseline, on the candidate's ≥ 20 labeled postings.
+
+**Not in this phase:** prompt tuning (the first full run is the reference point; changing
+the prompt against these 20 postings afterwards would be fitting to the test set),
+other models and providers, reasoning on/off, parallel calls, agent, `docs/results.md`
+tables (Phase 3 fills them from the run files).
+
+**Risks**
+- 20 postings is a small sample: one posting is 5 points of accuracy. Differences of
+  one or two postings between runs are noise, not a finding.
+- `temperature=0` does not make Gemini fully deterministic, least of all with thinking
+  on; two runs can differ. The run file keeps every prediction so differences can be
+  inspected.
+- Labels are one person's judgment. A wrong prediction may be a wrong label; the
+  per-posting error list with the `note` is there to review both sides.
+- Cost of the full run: about 20 × (2.5k input + 2.5k output) tokens on a Flash-tier
+  model, a few cents. The exact figure is printed by the run itself.
+- No new dependency is expected; the standard library covers JSONL, hashing and tables.
 
 ---
 

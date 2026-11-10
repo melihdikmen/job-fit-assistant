@@ -1,0 +1,21 @@
+Mobile Senior Software Engineer | Rubikpara (Elektronik Para Kuruluşu)
+İstanbul, Türkiye · Hybrid
+---
+Rubikpara, 2020 yılında kurulan ve TCMB'ye bağlı 6493 Sayılı Kanun'a tabi bir Elektronik Para Kuruluşu'dur. Kobilere Sanal Pos, Soft Pos, Fiziki Pos ve B2B ürünleri sunar.
+Senden ne bekliyoruz?
+Mobil uygulama geliştirme konusunda 5+ yıl, Flutter özelinde 3+ yıl deneyim
+Dart diline derinlemesine hakimiyet
+State management (GetX, Bloc, Provider) kütüphanelerinde ileri seviye tecrübe
+Clean Architecture, MVVM, OOP, SOLID, Design Patterns
+RESTful API entegrasyonları (Dio, Retrofit)
+Android (Kotlin/Java) veya iOS (Swift/Obj-C) native platformlarından en az biri; native modül ve platform channel yazabilen
+CI/CD, Flavor yönetimi ve App Store & Google Play süreçleri
+Firebase servisleri (Analytics, Crashlytics, Messaging, Remote Config, App Check)
+Mobil güvenlik pratikleri (SSL pinning, secure storage, şifreleme, root/jailbreak tespiti)
+Unit / Widget testleri ve E2E test otomasyonu (Maestro, Patrol)
+Code Review süreçlerini yürütebilme
+Tercihen fintek, banka veya ödeme kuruluşlarında deneyim
+Neler yapacaksın?
+iOS ve Android için Rubikpara mobil uygulamalarının uçtan uca tasarlanması, geliştirilmesi ve sahiplenilmesi
+Para transferi, QR ödeme, fatura ödeme, kart ve KYC gibi kritik finansal akışlar
+Native (Kotlin/Swift) taraflı entegrasyonlar

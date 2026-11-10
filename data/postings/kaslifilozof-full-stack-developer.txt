@@ -1,0 +1,23 @@
+Full Stack Developer | Kaslıfilozof
+Nilüfer, Bursa, Türkiye · İş yerinde (Bursa Balat ofisi, her gün)
+---
+Web ve mobil ürünler geliştiren bir teknoloji şirketiyiz. Canlıda çalışan bir web platformumuz (satış sitesi, yönetim paneli, API) ve iOS & Android uygulamamız var.
+Bu sistemi devralıp geliştirecek, yeni ürünlerimizi de sıfırdan kurabilecek bir full-stack geliştirici arıyoruz. Teknik tarafın sahibi sen olacaksın: kod, deploy, mağaza yayınları ve altyapı. Bursa Balat'taki ofisimizde tam zamanlı çalışacaksın.
+Ne yapacaksın:
+Next.js tabanlı web sitesi, yönetim paneli ve API'yi geliştirmek, canlıya almak ve ayakta tutmak
+Expo / React Native uygulamasına yeni özellikler eklemek; EAS ile build, OTA güncelleme ve App Store / Google Play yayınlarını yönetmek
+Ödeme akışını (3D Secure, ödeme teyidi, iadeler) güvenle işletmek
+Zamanlanmış işleri, e-posta ve push bildirim altyapısını izleyip iyileştirmek
+Yapay zeka (OpenAI, Gemini) kullanan özellikleri geliştirmek
+Aradığımız:
+TypeScript ile en az 3 yıl profesyonel deneyim
+Next.js (App Router) ve React ile canlıda çalışan proje deneyimi
+React Native + Expo ile mağazada yayınlanmış en az bir uygulama
+Node.js ile API geliştirme, MongoDB ve Mongoose bilgisi
+Kimlik doğrulama ve rol bazlı yetkilendirme deneyimi (NextAuth, JWT)
+Ödeme sistemi entegrasyonu deneyimi
+Vercel, Cloudflare gibi servislerde deploy
+Akıcı Türkçe
+Bursa'da ikamet eden ya da Balat'taki ofise her gün gelebilecek
+Artı:
+Native entegrasyonlar, push bildirim, deep link; LLM API'leriyle ürün geliştirme; Vitest, Playwright, Sentry; Claude Code, Cursor gibi AI kodlama araçları

@@ -10,10 +10,10 @@ different models, and a fixed workflow vs. an agent, on a labeled test set.
 - Install: `uv sync`
 - Test: `uv run pytest`
 - Lint: `uv run ruff check .` / format: `uv run ruff format .`
-- Eval (Phase 2+): `uv run python -m job_fit.eval --model <model>`
+- Eval: `uv run python -m job_fit.eval --model <model> --allow-incomplete`
 
 ## Folders
-- `src/job_fit/` – package (schema, rules, llm, workflow, agent, tools, eval)
+- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, agent, tools)
 - `data/cv.md` – candidate CV; `data/postings.jsonl` – labeled test set
 - `data/results/` – eval run outputs (git-ignored)
 - `tests/` – pytest suite; `docs/results.md` – model comparison tables

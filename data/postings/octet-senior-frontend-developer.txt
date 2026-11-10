@@ -1,0 +1,17 @@
+Senior Frontend Developer | Octet Türkiye
+İstanbul, Türkiye · Hybrid
+---
+We're looking for software engineer that has experience with both React web development and React Native mobile app development.
+Job Responsibilities:
+Write clean, well-tested, reusable quality code, adhering to best practices.
+Participate and contribute to peer code reviews.
+Participate in all relevant sprint ceremonies.
+Qualifications and Skills:
+BS/MS in Computer Science, or equivalent.
+Experience with Agile development methodologies (Scrum etc.).
+Working experience on micro-frontend architecture and managing monorepo for multiple teams
+7+ years of experience as a software engineer.
+5+ years JavaScript experience. Experience with TypeScript is a plus.
+3+ years React / React Native development experience.
+Deep understanding of Reactjs, React Native, JavaScript, Typescript, Nodejs, Jest, HTML5, CSS3
+Experience architecting React applications, structure, component libraries, micro front ends.

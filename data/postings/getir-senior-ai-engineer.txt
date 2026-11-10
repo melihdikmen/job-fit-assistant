@@ -1,0 +1,43 @@
+Senior AI Engineer | Getir
+İstanbul, Türkiye · Hybrid
+---
+We are looking for a Senior AI Engineer with strong backend engineering skills and a solid understanding of AI/ML technologies to design, build, and scale production-grade AI systems and agentic platforms.
+The ideal candidate combines software engineering expertise with hands-on experience in LLM-based applications, agentic workflows, and machine learning. You will primarily focus on developing scalable AI platforms, services, and agent orchestration systems while also contributing to machine learning and data science projects when needed.
+What You'll Bring ?
+Required Qualifications
+Bachelor's degree in Computer Science, Computer Engineering, or a related field.
+3+ years of hands-on experience in backend software engineering, AI engineering, or machine learning engineering.
+Strong proficiency in Python, including asynchronous programming, concurrency, and object-oriented design.
+Strong experience developing scalable backend services and REST APIs using frameworks such as FastAPI.
+Solid understanding of microservices architecture, distributed systems, and event-driven applications.
+Hands-on experience with LLM-based applications, including prompting, tool calling, structured outputs, and RAG.
+Familiarity with agentic AI frameworks such as LangGraph, LangChain, CrewAI, or similar technologies.
+Experience with SQL and NoSQL databases such as PostgreSQL, MongoDB, or DynamoDB.
+Experience with Redis, caching strategies, and state management.
+Experience with Docker, Kubernetes, and CI/CD practices.
+Good understanding of machine learning fundamentals, model development, and inference.
+Nice to Have
+Experience building agent orchestration platforms, multi-agent systems, or autonomous AI workflows.
+Familiarity with Model Context Protocol (MCP), agent-to-agent communication, and tool integration.
+Experience with sandboxed code execution, workflow engines, and distributed task processing.
+Experience with Kafka, message queues, and asynchronous task processing.
+Experience with cloud platforms such as AWS.
+Experience deploying and serving LLMs or other ML models in production.
+Knowledge of ML libraries such as scikit-learn, XGBoost, LightGBM, PyTorch, or TensorFlow.
+Experience with vector databases, embeddings, and semantic search.
+Familiarity with LLM evaluation, observability, and performance optimization.
+Your Responsibilities
+Design, develop, and maintain scalable backend services supporting AI applications and agentic platforms.
+Build and improve agent orchestration systems, tool integrations, and multi-agent workflows.
+Develop reliable APIs and integrations connecting AI agents with internal and external services.
+Implement asynchronous execution, state management, caching, and distributed processing mechanisms.
+Integrate LLMs, pipelines, and other AI capabilities into production systems.
+Improve platform reliability, scalability, observability, latency, and cost efficiency.
+Collaborate with AI, Data Science, and engineering teams to develop and deploy machine learning solutions.
+Contribute to ML model development, experimentation, and inference pipelines when needed.
+Evaluate emerging AI technologies and adapt them to solve real-world business problems.
+Benefits
+Hybrid working model
+Health insurance (family included)
+Meal card
+Competitive salary

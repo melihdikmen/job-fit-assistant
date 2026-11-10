@@ -23,3 +23,6 @@ wheels/
 # Tool caches
 .pytest_cache/
 .ruff_cache/
+
+# Candidate working notes for the test set
+data/postings/_labels.txt

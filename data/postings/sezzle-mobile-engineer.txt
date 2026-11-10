@@ -1,0 +1,40 @@
+Mobile Engineer (Turkey, All Levels) | Sezzle
+Ankara, Türkiye · Uzaktan (Remote)
+---
+The salary range for this role is $3,000 - $4,500 per month (Gross in USD)
+About Sezzle
+With a mission to financially empower the next generation, Sezzle is revolutionizing the shopping experience beyond payments, blending cutting-edge tech with seamless, interest-free installment plans that make shopping smarter and more accessible.
+About the Role
+We are seeking a talented and motivated Mobile Engineer who is best in class with a high IQ plus a high EQ. This role presents an exciting opportunity to thrive in a dynamic, fast-paced environment within a rapidly growing team, with abundant prospects for career advancement.
+As a Software Engineer focused on our mobile app, you will be responsible for solving challenges in our highest-traffic applications, with your work having a direct impact on our customers and product. Day-to-day, you'll partner with your team to build out features and products in our React Native-based mobile app. In this role, you'll also provide support for our mobile app as a platform, working closely with engineers from multiple teams to support larger product releases. Sezzle has a strong culture for promotion with defined paths through Engineering that matches all levels. You'll be working as part of a full-stack Engineering team which has varied disciplines.
+Compensation
+Sezzle is a U.S. based company listed on NASDAQ. Salary ranges are
+Mid $3,000 - $4,500 USD per month
+Interview Process
+Application submitted
+Wonderlic test (30-40 min)
+Coding assessment (~1.5 hours)
+Interview with recruiters (30 min)
+Interview with engineers (1 hour)
+Interview with engineering leadership (30-45 min)
+Offer!
+What You'll Do
+Work within our cross-platform TypeScript React Native app to build and maintain new innovative product features.
+Actively learn new areas of the product, and collaborate with owners for different product features to gain insight and offer constructive suggestions for improvements
+Be an active participant in design/architecture discussions sharing your ideas while building the next generation of features for the Sezzle platform
+Hands-on with our codebase and a contributor to code reviews
+Work with the team to continuously build clean, scalable, robust, and testable code
+Assist in planning, estimations, and completion for projects brought up by the team stakeholders
+What We Look For
+Experience solving technical problems as part of a team
+Bachelor's in computer science or related.
+Experience with Swift.
+Demonstrated experience working with Claude or equivalent large language model tools is required; candidates must be comfortable leveraging AI to enhance productivity, research, and communication.
+Familiarity with modern Frontend Development, Javascript or Typescript, with React Native or React (web) experience strongly preferred
+Preferred Knowledge and Skills
+Experience developing and delivering a mobile application to a mobile app store (App Store or Google Play Store)
+Knowledgeable in writing automated tests for applications (unit, integration, end-to-end)
+Familiar with the basic principles and design of React Native Apps, and RESTful APIs
+Close familiarity with software engineering tools, software development methodology, and release processes
+About You
+You have relentlessly high standards - many people may think your standards are unreasonably high. You are continually raising the bar and driving those around you to deliver great results.

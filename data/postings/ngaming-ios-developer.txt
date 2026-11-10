@@ -1,0 +1,17 @@
+iOS Developer | NGAMING (D Yazılım Teknoloji A.Ş. – Nesine, atyarışı.com, Liderform)
+İstanbul, Türkiye · Hybrid
+---
+Qualities
+Bachelor's degree in Computer Engineering or related fields
+3+ years of full-time industry experience working on iOS
+Strong Swift and SwiftUI skills
+Capability of writing unit tests
+An eye for good UX
+Really comfortable with Git
+Strong verbal and written communication skills, and ability to explain complex technical issues
+Experience in performance profiling with Instruments on Xcode, experience in WebSocket is a plus.
+Job Description
+Develop and maintain native iOS Application
+Proactively drive technical direction such as implementing new features, preventing issues, improving performance, reducing app size / battery consumption / data usage, refactoring the codebase.
+Benefits
+Private health insurance, meal card, transportation benefits on office working days, extra leave days.

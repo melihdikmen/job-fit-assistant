@@ -1,0 +1,19 @@
+Shopify Solutions Engineer | Nodus Works
+Türkiye · Uzaktan
+---
+Nodus Works, İstanbul merkezli bir Shopify Partner ajansı. Müşteri projelerimizin teknik tarafını uçtan uca üstlenecek bir Shopify Solutions Engineer arıyoruz.
+Neler yapacaksınız
+• Shopify mağaza kurulumları ve başka altyapılardan Shopify'a taşımalar
+• Shopify Plus checkout, indirim ve sepet özelleştirmeleri (Checkout UI extensions, Shopify Functions, metaobject'ler)
+• Markalara özel Shopify uygulamaları ve entegrasyonlar: Admin GraphQL API, webhook'lar; ERP, kargo ve pazaryeri bağlantıları
+• Node.js / TypeScript backend servisleri, AWS; gerektiğinde Laravel paneller
+• React Native / Expo ile marka mobil uygulamalarının kurulumu ve mağaza yayını
+• Müşteri teknik taleplerini karşılamak
+Aradığımız
+• ERP (Nebim, SAP) ve pazaryeri (Trendyol, Hepsiburada, Amazon) entegrasyonları
+• React Native / Expo, Laravel / PHP deneyimi
+• En az 4 yıl web geliştirme, bunun en az 2 yılı Shopify'da
+• Shopify app geliştirme (React Router app şablonu, Prisma, App Bridge, Polaris, Admin GraphQL API)
+• AWS (EC2, RDS, S3), Docker
+• Liquid ve Online Store 2.0 temaları
+• En az 5 mağaza taşımasında baştan sona yer almış olmak

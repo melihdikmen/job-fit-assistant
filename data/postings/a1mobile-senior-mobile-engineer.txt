@@ -1,0 +1,24 @@
+Senior Mobile Engineer | a1mobile
+Türkiye · Uzaktan (fully remote, open to candidates anywhere in Türkiye)
+---
+Compensation: Monthly net base salary TRY 150,000–250,000.
+a1mobile is building the AI-native carrier for businesses: mobile, landline, and AI phone systems together. Recently raised an $11.5M seed round led by General Catalyst.
+We're looking for a Senior Mobile Engineer to own our Flutter app on iOS and Android: messages and calls, AI receptionist, eSIM setup, billing. You'll ship fast with AI coding tools while keeping the app reliable, offline-friendly, and true to our design system.
+Experience
+5+ years of professional mobile development, including 3+ years shipping production Flutter apps.
+Apps shipped and maintained on both the App Store and Google Play.
+What you'll work on
+Own the Flutter app end to end: architecture, features, performance, and releases.
+SIM and eSIM management, usage and billing, number porting status.
+Realtime messaging, call history, and notifications: WebSockets, push notifications, offline caching.
+Work with backend engineers on API contracts; clean, well-tested data layers.
+Turn Figma designs into pixel-accurate UI on a token-based design system.
+Widget, golden, and end-to-end tests; keep CI green.
+Ship through TestFlight and Google Play tracks, watch crash reports.
+What we're looking for
+Deep Flutter and Dart expertise: state management (Riverpod or similar), navigation, async code, performance profiling.
+Solid native knowledge: iOS (Swift, Xcode, signing, push) and Android (Kotlin, Gradle, Play Console).
+Offline-first apps, local databases (SQLite/Drift), realtime data.
+Clean architecture and strong testing habits.
+Daily, hands-on use of AI coding tools such as Claude Code and Codex.
+Interviews are conducted in English.

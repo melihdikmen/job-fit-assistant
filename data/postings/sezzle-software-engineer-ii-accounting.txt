@@ -1,0 +1,7 @@
+Software Engineer II with Accounting Experience | Sezzle
+Türkiye · Uzaktan
+---
+The salary range for this role is $2,800 - $6,000 per month (Gross in USD).
+We are seeking a Software Engineer with a unique blend of accounting experience. This role is tailored for professionals who started their careers in accounting but pivoted to engineering and now want to leverage their domain expertise to solve technical challenges in fintech.
+Mid-level role, 3-7 years of experience.
+Requirements: prior accounting / financial analyst background, backend development (Golang, Python or Java), MySQL/PostgreSQL, experience with Claude or equivalent LLM tools.
