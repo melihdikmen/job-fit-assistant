@@ -88,7 +88,7 @@ any open-weight model.
 
 ### Which model I chose and why
 
-_Draft written by Claude from the numbers above; the candidate confirms or rewrites it._
+_Drafted by Claude from the numbers above and confirmed by the candidate on 2026-11-10._
 
 I chose **`gemini-2.5-flash` with reasoning on**. It has the best accuracy (71.4%, 15 of
 21, against 57.1% for the always-SKIP baseline) and the lowest weighted error (0.43

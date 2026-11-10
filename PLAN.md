@@ -7,7 +7,7 @@
 | 0 – Setup | ✅ | see `git log --grep phase-0` | uv project, ruff + pytest configured, 1 smoke test |
 | 1 – Structured output | ✅ | see `git log --grep phase-1` | `gemini-2.5-flash` on Vertex; 3 samples run live; 75 tests |
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
-| 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen (draft, candidate to confirm): `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
+| 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ⬜ | | |
 | 5 – Harden | ⬜ | | |
 | 6 – UI (optional) | ⬜ | | |
@@ -24,7 +24,6 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D21 | Confirm or rewrite the "Which model I chose and why" paragraph in `docs/results.md` (drafted by Claude). | before Phase 4 | Confirm; Phase 4 then compares workflow and agent on `gemini-2.5-flash` with reasoning on |
 | D22 | Confirm the list prices of `gemini-4-carbon` (2.00 / 10.00) and `gemini-3.1-flash-lite` (0.25 / 1.50) on the Vertex AI pricing page in a browser. | before the README (Phase 5) | If they differ, correct `pricing.py`; cost per 100 postings can be recomputed from the saved token counts without new runs |
 
 ## Decided
@@ -83,6 +82,10 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   after 8 postings; aborted runs are not saved and not patched into the table. The
   candidate decided not to repeat them: a free endpoint would not be used in practice.
   The `openrouter` provider itself is verified by two one-posting live runs.
+
+- D21 (2026-11-10): the candidate confirmed the "Which model I chose and why" paragraph
+  in `docs/results.md`. The chosen configuration is `gemini-2.5-flash` with reasoning
+  on; Phase 4 compares workflow and agent on it.
 
 ## What the candidate does (Claude cannot)
 
@@ -609,7 +612,7 @@ $0.59, plus a few cents for smoke runs and model probes.
 
 ### Findings to carry into Phase 4
 - Chosen model for the workflow-vs-agent comparison: `gemini-2.5-flash` with reasoning
-  on (pending D21). An agent makes several model calls per posting, so its cost and
+  on (D21). An agent makes several model calls per posting, so its cost and
   latency start from $0.64 per 100 postings and 11.9 s and go up.
 - Noise: the repeated reasoning-off run changed 3 of 21 predictions, 1 posting of
   accuracy and 1 point of weighted error. Phase 4 needs a difference larger than that
