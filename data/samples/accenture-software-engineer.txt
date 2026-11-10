@@ -1,0 +1,49 @@
+İş ilanı hakkında
+Accenture is a leading global professional services company that helps the world’s leading businesses, governments and other organizations build their digital core, optimize their operations, accelerate revenue growth and enhance citizen services—creating tangible value at speed and scale. We are a talent and innovation-led company serving clients in more than 120 countries. We combine our strength in technology and leadership in cloud, data and AI with unmatched industry experience, functional expertise and global delivery capability. We measure our success by the 360° value we create for our clients, each other, our shareholders, partners and communities.
+
+What’s in it for you?
+
+✨Work-Life Balance: Hybrid working model / Flexible hours / Birthday off / No dress code / Happy Hours
+
+🩺Health & Wellness: Life & Health Insurance / An Employee Assistance & Wellness Program
+
+🚌Transportation: Shuttle service / Transportation support
+
+💰 Financial Benefits: Meal allowance / Employee Referral Bonus Program / Performance bonus & promotion / Accenture Recognition Points
+
+💪Professional Development: Learning budget / Personal career development with People Leads / Buddy Program
+
+🌎Work Environment: Working on international projects with a globally diverse team / A fast-paced technology environment
+
+Required Qualifications:
+
+
+3+ years of software engineering and hands-on programming experience in web applications
+Experience in .Net and/or Java
+Experience in React or Angular
+Strong written and verbal communication skills in English
+Experience in Agentic AI
+Experience in Python, Node.JS (nice to have)
+Experience in REST services, SOAP
+Familiarity with one of the cloud platforms such as Azure, AWS, GCP
+Familiarity with relational databases, NoSQL databases, data storage and processing
+Familiarity with DevOps (Continuous Integration, Continuous Testing and Continuous Delivery) is a plus
+Excellent problem-solving skills and a high degree of intellectual horsepower
+BS or higher degree in Computer Science or related discipline, or equivalent industry experience
+
+
+Key Responsibilities:
+
+
+Build rich client web applications with a focus on performance and user experience
+Follow, learn and apply new technologies and innovations
+Pursue opportunities to improve delivery quality and efficiency within the organization
+
+
+Ready to make an impact? If you are excited about working with cutting-edge technology and participating in thrilling international projects, we want to hear from you! Join Accenture and achieve your goals.
+
+#GreatPlaceToWork
+
+Location: Teknopark Istanbul (Kurtköy) Hybrid: 3 days office per week
+
+Apply Now!

@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Decides APPLY / PREPARE / SKIP for a job posting and a CV, and benchmarks LLMs on that task."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "google-genai>=3.0.0",
+    "pydantic>=2.14.3",
+    "python-dotenv>=1.2.4",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

@@ -1,0 +1,39 @@
+İş ilanı hakkında
+Come Innovate Motion with Us
+As a Senior Software Engineer you will contribute to the development and continuous improvement of software applications used in manufacturing and operational environments. Working closely with senior developers and business stakeholders, you will support ongoing digitalization initiatives and contribute to system enhancements.
+Your responsibilities will be to:
+Design, develop, and maintain industrial applications and services using C#/.NET, Angular, MSSQL, Redis, NATS, and related technologies
+Own solutions end-to-end, from requirement gathering and architecture through implementation, deployment, monitoring, and production support
+Use AI-assisted development tools to accelerate coding, testing, refactoring, documentation, and troubleshooting while remaining responsible for the correctness, security, performance, and maintainability of the solution
+Develop backend services, APIs, and machine-data integrations using technologies such as MQTT, NATS, OPC-UA, and Kepware
+Design and optimize databases, queries, stored procedures, caching strategies, and production data flows
+Build real-time dashboards, reporting, and monitoring solutions for production KPIs and operational data
+Design reliable systems that handle production realities such as high data volumes, concurrency, connectivity issues, duplicate messages, and out-of-order events
+Troubleshoot issues across frontend, backend, database, messaging, infrastructure, and machine integration layers
+Work directly with operators, engineers, and production teams to understand requirements, validate solutions, and improve existing systems
+Participate in architecture discussions, code reviews, technical standards, CI/CD, automated testing, and production diagnostics
+Identify opportunities to automate repetitive development and operational processes using software and AI
+Travel abroad when required for business needs, including project implementation, technical support, collaboration
+
+Our Requirements:
+Bachelor’s degree in Computer Science, Software Engineering, Information Systems, Engineering, or a related technical field, or equivalent professional experience
+5+ years of professional software engineering experience, preferably involving production systems, manufacturing, MES, industrial automation, or machine integration
+Strong C#/.NET skills, including ASP.NET Core, APIs, asynchronous programming, and background services
+Strong Angular and TypeScript development skills
+Strong MSSQL knowledge, including database design, indexing, query optimization, and stored procedures
+Understanding of distributed systems, messaging, caching, concurrency, and event-driven architectures
+Experience with technologies such as NATS, MQTT, OPC-UA, Kepware, or similar industrial integration platforms
+Practical experience with AI-assisted development tools such as GitHub Copilot, Claude Code, Codex, or equivalent tools
+Ability to review AI-generated code for correctness, security, performance, maintainability, and architectural fit
+Understanding of Git, automated testing, CI/CD, observability, logging, and production troubleshooting
+Strong problem-solving skills across software, database, integration, and manufacturing environments
+Ability to communicate effectively with software teams, controls engineers, process engineers, operators, and business stakeholders
+Willingness and ability to travel extensively internationally
+
+What do we offer:
+A truly international and multicultural work environment, in a company listed among top 500 industrial enterprises in Turkey
+Private health insurance which includes family members
+Local pension plan
+Various allowance benefits
+
+*This is an on-site position at our Izmir Plant in the Aegean Free Zone (ESBAS), Izmir, Türkiye. Remote or hybrid working is not available.

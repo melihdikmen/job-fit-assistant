@@ -1,0 +1,16 @@
+İş ilanı hakkında
+Brandsight is an AI-powered virtual try-on and social commerce app for fashion, built by Miny and live on the iOS App Store. Users see clothes on themselves before they buy, then share and shop looks, and brands sell directly through the app.
+Our research team builds the generative models in-house. We need an engineer who can turn them into a product people open every day.
+→ https://brandsight.app
+About the Role
+You'll own features end to end, from the Postgres schema through the Go API to the React Native app. Concretely, that means:
+• A try-on result that comes back fast and reliably, every time, even when GPU jobs queue up• A feed full of images and video that scrolls at 60fps on a mid-range phone• Job pipelines that never double-charge, never lose a request and recover on their own• Shipping weekly to the App Store without breaking anything
+You'll work directly with research and design and have real say over what we build and how it feels.
+What We're Looking For
+• React Native + TypeScript: you've shipped at least one app to production, and you know how to keep rendering fast with long lists and heavy media• Go: concurrency, async job pipelines (idempotency, retries) and clean API design• PostgreSQL: schema design, reading query plans, indexing and transactions• Caching & performance: you cache at the right layer, handle invalidation properly and measure latency end to end• Cloud: containers, serverless deploys and CI/CD• Product taste: you care how things feel, not just whether they work
+Bonus Points
+• Native debugging in Swift / Kotlin, RN New Architecture• Next.js server components, SEO, universal links• pgvector, row-level security• Hosted LLM, vision or embedding APIs• Exposure to GPU inference or diffusion models• Observability: structured logging, metrics, tracing
+Our Stack
+React Native · TypeScript · Go · PostgreSQL · Next.js · PyTorch (GPU inference) · serverless CPU & GPU
+How We Work
+• We measure before we optimize• We write design docs for large changes• We use AI tools to move fast, and we take responsibility for every line that ships

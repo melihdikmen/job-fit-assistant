@@ -5,7 +5,7 @@
 | Phase | Status | Commit | Notes |
 |---|---|---|---|
 | 0 – Setup | ✅ | see `git log --grep phase-0` | uv project, ruff + pytest configured, 1 smoke test |
-| 1 – Structured output | ⬜ | | |
+| 1 – Structured output | ✅ | see `git log --grep phase-1` | `gemini-2.5-flash` on Vertex; 3 samples run live; 75 tests |
 | 2 – Test set and eval | ⬜ | | |
 | 3 – Model selection | ⬜ | | |
 | 4 – Agent | ⬜ | | |
@@ -24,9 +24,7 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D2 | Hybrid role in a city other than Ankara/Istanbul: `SKIP`? | Phase 1 | Yes, treat like on-site |
-| D3 | Remote role not open to Türkiye (e.g. "Remote – US only"): `SKIP`? | Phase 1 | Yes; schema needs a way to express it (see Phase 1) |
-| D4 | `english_risk`: trust the LLM flag only, or also a keyword check in code? | Phase 1 | LLM flag OR keyword match on posting text |
+| D11 | Newer Gemini models (3.x) answer only in the `global` location; `.env` uses `us-central1`, where only `gemini-2.5-flash` answered. Switch `GOOGLE_CLOUD_LOCATION` to `global`? | Phase 3 | Yes, before picking the 3 cloud models |
 | D5 | A posting whose call fails even after retry: how is it scored in eval? | Phase 2 | Count as wrong, with the worst cost in its row; report the count separately |
 | D6 | Weighted error: total over the set, or mean per posting? | Phase 2 | Report both; compare models on the mean |
 | D7 | Local machine RAM / GPU VRAM for Ollama? | Phase 3 | Check before picking the local model |
@@ -36,6 +34,15 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 - D1 (2026-11-10): `data/cv.md` is **not committed**. It is git-ignored; the repo carries
   `data/cv.example.md` as a template.
+- D2 (2026-11-10): a hybrid role outside Ankara/Istanbul is `SKIP`, same as on-site.
+- D3 (2026-11-10): a remote role not open to Türkiye is `SKIP`.
+- D4 (2026-11-10): `english_risk` is true if the LLM flags it **or** a keyword check on
+  the posting text matches.
+- D9 (2026-11-10): Turkish words are allowed in code only as match data inside named
+  keyword constants in `rules.py` (city spellings, English-requirement phrases).
+  Everything else stays English.
+- D10 (2026-11-10): the candidate supplies 3 real postings as text files in
+  `data/samples/` (format in `data/samples/README.md`).
 
 ## What the candidate does (Claude cannot)
 
@@ -78,43 +85,124 @@ Source: [PROCESS.md §5 Phase 0](PROCESS.md#phase-0--setup)
 
 ---
 
-## Phase 1 – Structured output (roadmap)
+## Phase 1 – Structured output (done)
 
-**Dependencies:** `pydantic`, `google-genai`, `openai` (OpenAI-compatible client for
-OpenRouter and Ollama), `python-dotenv`.
+Source: [PROCESS.md §5 Phase 1](PROCESS.md#phase-1--structured-output-fixed-workflow)
 
-**Design**
-- `schema.py` – `JobDecision` exactly as in PROCESS.md, `rationale` first. Add `Field`
-  descriptions; they are sent to the model as part of the schema. Per D3, `location`
-  description asks for country too (e.g. "Remote – Türkiye").
-- `llm.py` – one entry point, provider and model as parameters:
-  `generate_structured(provider, model, system, user, schema) -> LLMResult`
-  (`parsed`, `raw_text`, `input_tokens`, `output_tokens`, `latency_s`).
-  - `vertex`: `google-genai` with `response_mime_type="application/json"` and
-    `response_schema`; tokens from `usage_metadata`.
-  - `openrouter`, `ollama`: `openai` SDK with a JSON-schema `response_format`;
-    tokens from `usage`.
-  - A `reasoning` option is part of the signature from the start (used in Phase 3).
-- `rules.py` – pure functions, no LLM: `apply_rules(decision, posting_text) -> JobDecision`.
-  - Seniority `intern` / `junior` → `SKIP`.
-  - Location: `onsite` (and `hybrid`, per D2) outside Ankara/Istanbul → `SKIP`;
-    remote not open to Türkiye → `SKIP` (D3). City matching ignores case and
-    Turkish characters (`İstanbul` = `Istanbul`).
-  - English: sets `english_risk = true` (D4), never changes the decision by itself.
-  - `unknown` values never trigger an override.
-  - Every override appends `rule: <name>` to `rationale`; several can apply.
-- `workflow.py` – `decide(posting_text, cv) -> DecisionResult` (final decision, the LLM's
-  original decision, which rules fired, tokens, latency). One retry on validation error,
-  then a clear `DecisionError`. Small CLI to run one posting file and print the result.
+### Before coding (candidate)
+- [ ] Copy `data/cv.example.md` to `data/cv.md` and fill it in.
+- [ ] Create `.env` from `.env.example`, set `GOOGLE_CLOUD_PROJECT`.
+- [ ] `gcloud auth application-default login` (gcloud is installed), Vertex AI API enabled.
+- [ ] 3 sample postings (D10), ideally one clear fit, one where a rule should fire
+      (e.g. on-site outside Ankara/Istanbul, or junior), one English-heavy.
 
-**Tests:** ≥ 5 for `rules.py` (PROCESS requires it); retry logic with a mocked LLM.
+### Steps
+1. [x] `uv add pydantic google-genai python-dotenv`.
+       The `openai` package is added in Phase 3, together with the OpenRouter and Ollama
+       providers, when they can be run and verified.
+2. [x] `schema.py` – `JobDecision` with the exact fields and order from PROCESS.md
+       (`rationale` first). Each field gets a `Field(description=...)`; descriptions are
+       sent to the model inside the schema. `location` format is fixed by its description:
+       `"City, Country"` for on-site/hybrid, `"Remote (<region>)"` for remote
+       (e.g. `Remote (Türkiye)`, `Remote (Worldwide)`, `Remote (US only)`), so that the
+       D3 rule can read it without adding a field to the schema.
+3. [x] `rules.py` – pure functions, no I/O, no LLM:
+       - `violated_rules(location, work_mode, seniority) -> list[str]` (takes plain values,
+         so the Phase 4 `check_rules` tool can call it directly)
+       - `has_english_risk(posting_text) -> bool` (keyword match, D4/D9)
+       - `apply_rules(decision, posting_text) -> RuleOutcome` (new `JobDecision` + names
+         of rules that fired; the input object is not mutated)
+       Behavior:
+       - seniority `intern` / `junior` → `SKIP`, `rule: seniority`
+       - `onsite` or `hybrid` outside Ankara/Istanbul → `SKIP`, `rule: location` (D2)
+       - `remote` whose region is not Türkiye / worldwide → `SKIP`, `rule: location` (D3)
+       - English: `english_risk = llm_flag or keyword_match`; decision unchanged (D4)
+       - `unknown` work mode, location or seniority never triggers an override: a wrongly
+         skipped good job costs 3, a wasted application costs 1
+       - text matching ignores case and Turkish characters (`İstanbul` = `istanbul`)
+       - every override appends `rule: <name>` to `rationale`; several can apply
+4. [x] `llm.py` – the only module that imports a provider SDK or reads `.env`:
+       `generate_json(provider, model, system, user, schema, *, reasoning=None,
+       timeout_s=60) -> LLMResponse` (`text`, `input_tokens`, `output_tokens`, `latency_s`).
+       - `vertex`: `google-genai` client, `response_mime_type="application/json"`,
+         `response_schema=schema`, `temperature=0`; tokens from `usage_metadata`
+         (thinking tokens counted as output); latency with `time.perf_counter()`.
+       - `openrouter` / `ollama`: accepted by the signature, raise a clear
+         "not implemented until Phase 3" error.
+       - Returns raw JSON text; it does not validate. Validation and retry belong to the
+         workflow, as PROCESS.md describes.
+5. [x] `workflow.py`:
+       - `SYSTEM_PROMPT` constant and `build_user_prompt(posting_text, cv)` with the
+         posting and CV in clearly delimited blocks
+       - `decide(posting_text, cv, *, model, provider="vertex", llm=generate_json)
+         -> DecisionResult` — `llm` is injectable so tests pass a fake
+       - validate with `JobDecision.model_validate_json`; on `ValidationError` retry once,
+         then raise `DecisionError` (model, attempts, validation message; no CV text in
+         the error)
+       - apply `rules.py` to the validated output
+       - `DecisionResult`: final `JobDecision`, the LLM's original decision, rules fired,
+         input tokens, output tokens, latency (summed over attempts), attempts
+       - CLI: `uv run python -m job_fit.workflow --posting <file> --model <id>
+         [--cv data/cv.md]` prints the decision as JSON plus tokens and latency
+6. [x] Tests (no network, no real LLM):
+       - `test_schema.py`: valid JSON parses; invalid `decision` value rejected; missing
+         field rejected; first field is `rationale`
+       - `test_rules.py` (≥ 5 required, ~12 planned): on-site Bursa → SKIP; hybrid Izmir →
+         SKIP; on-site `İstanbul` kept; remote Türkiye kept; remote US-only → SKIP;
+         junior → SKIP; intern → SKIP; senior kept; unknowns never override; English
+         keyword sets the flag without changing the decision; LLM flag kept when no
+         keyword; two rules both appended; input not mutated
+       - `test_workflow.py`: valid on first try; invalid then valid (2 attempts, tokens
+         summed); invalid twice → `DecisionError`; rule override keeps the LLM's
+         original decision in the result
+       - `test_llm.py`: unknown provider rejected; Vertex response mapped to
+         `LLMResponse` using a fake client
+7. [x] Pick the Phase 1 model: a Flash-tier Gemini on Vertex. The exact model id is
+       looked up at implementation time, not assumed.
+8. [x] Live run on the 3 sample postings (`data/samples/`); show the full output,
+       tokens and latency for each.
+9. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show output.
+10. [x] Commit `phase-1: structured output workflow`; update the status table.
 
-**Done when:** 3 sample postings run end to end, output validates, tokens and latency
-are printed, rules have ≥ 5 passing tests.
+### Live run results (2026-11-10, `gemini-2.5-flash`, `us-central1`)
 
-**Risk:** rules act on fields the LLM extracts (location, seniority). A wrong extraction
-means a wrong override; keeping the LLM's original decision in the result makes this
-visible in Phase 2.
+| Posting | LLM decision | Final | Rules fired | In / out tokens | Latency |
+|---|---|---|---|---|---|
+| accenture-software-engineer | APPLY | APPLY | none | 2445 / 2038 | 16.1 s |
+| izmir-senior-software-engineer | SKIP | SKIP | location | 2619 / 2649 | 15.5 s |
+| miny-engineer-ai-inference-product | SKIP | SKIP | none | 2415 / 2700 | 18.5 s |
+
+All three answers validated on the first attempt.
+
+### Findings to carry into Phase 2
+- Miny came out `SKIP` because Go is missing, while the example row in PROCESS.md labels
+  it `APPLY`. That is the most expensive error in the cost matrix (missed good job, 3).
+  Do not tune the prompt on one example; measure on the labeled set first.
+- Output tokens (2000–2700) are far above the size of the JSON: `gemini-2.5-flash`
+  thinks by default and thinking tokens are counted as output. This drives cost and
+  latency; compare reasoning on/off in Phase 3.
+- Extraction quirks seen: company `Brandsight` instead of `Miny`; seniority `unknown`
+  for Accenture ("3+ years"); `english_risk` true for postings merely written in English.
+  Location and work mode were reported as `unknown` when not stated (no guessing).
+- The live run did not show a rule overriding an `APPLY` (the model already said `SKIP`
+  for Izmir). That path is covered by unit tests only.
+- Listing models needs a quota project on the local credentials
+  (`GOOGLE_CLOUD_QUOTA_PROJECT` or `gcloud auth application-default set-quota-project`);
+  `generate_content` works without it.
+
+**Done when:** 3 sample postings run end to end, output validates against the schema,
+tokens and latency are printed, `rules.py` has ≥ 5 passing tests.
+
+**Not in this phase:** OpenRouter/Ollama providers, eval metrics, cost in USD, agent.
+
+**Risks**
+- Rules act on fields the LLM extracts (location, work mode, seniority). A wrong
+  extraction means a wrong override. Keeping the LLM's original decision in
+  `DecisionResult` makes this measurable in Phase 2.
+- The `Remote (<region>)` convention depends on the model following the field
+  description; an unrecognized region is treated as unknown (no override) only when
+  the text is literally `unknown`, otherwise it is `SKIP`. Reviewed after the live run.
+- Live calls spend Vertex credits: 3 postings on a Flash-tier model, a few cents at most.
 
 ---
 
