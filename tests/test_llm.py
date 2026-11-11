@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import openai
 import pytest
 from google.genai import errors as genai_errors
@@ -134,6 +135,26 @@ def test_api_error_is_wrapped_in_llm_error() -> None:
         _call_vertex(client)
 
     assert raised.value.__cause__ is api_error
+
+
+@pytest.mark.parametrize(
+    "transport_error",
+    [httpx.ReadTimeout("timed out"), httpx.ConnectError("no route to host")],
+)
+def test_timeout_and_connection_errors_are_wrapped_in_llm_error(
+    transport_error: httpx.HTTPError,
+) -> None:
+    """A timeout fails one posting through LLMError instead of crashing the eval run.
+
+    The SDK re-raises httpx errors as they are once its retries are used up; they are
+    not APIError.
+    """
+    client = _fake_client(error=transport_error)
+
+    with pytest.raises(LLMError, match=MODEL) as raised:
+        _call_vertex(client)
+
+    assert raised.value.__cause__ is transport_error
 
 
 def test_missing_project_raises_llm_error(monkeypatch: pytest.MonkeyPatch) -> None:

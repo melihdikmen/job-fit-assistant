@@ -47,6 +47,13 @@ def test_malformed_json_is_rejected() -> None:
         JobDecision.model_validate_json('{"rationale": "cut off')
 
 
+@pytest.mark.parametrize("document", ["[]", "null", '"APPLY"', "42", ""])
+def test_json_of_the_wrong_shape_is_rejected(document: str) -> None:
+    """Valid JSON that is not an object, and an empty answer, are rejected."""
+    with pytest.raises(ValidationError):
+        JobDecision.model_validate_json(document)
+
+
 @pytest.mark.parametrize(
     ("field", "bad_value"),
     [

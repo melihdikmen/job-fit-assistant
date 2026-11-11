@@ -215,7 +215,9 @@ def _generate_vertex(
     started = time.perf_counter()
     try:
         response = client.models.generate_content(model=model, contents=user, config=config)
-    except genai_errors.APIError as err:
+    # The SDK re-raises timeouts and connection errors as plain httpx errors once its
+    # retries are used up; uncaught, one slow posting would end a whole eval run.
+    except (genai_errors.APIError, httpx.HTTPError) as err:
         raise LLMError(f"Vertex call failed for model '{model}': {err}") from err
     latency_s = time.perf_counter() - started
 

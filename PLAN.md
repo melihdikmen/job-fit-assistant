@@ -9,7 +9,7 @@
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
-| 5 – Harden | ⬜ | | |
+| 5 – Harden | 🟡 | | plan approved 2026-11-11; steps 1–8 in progress; push waits for D32 and the repo URL |
 | 6 – UI (optional) | ⬜ | | |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
@@ -24,6 +24,8 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
+| D33 | Review findings R3 and R4: make the location rule match whole words and treat a location without a recognizable place as unknown (no override)? | Phase 5, before step 10 | Yes for R3 (it is the costliest error, a good job skipped, and contradicts "unknown never overrides"); R4 by matching whole words and rejecting "excluding / not" phrasings. The saved runs do not store the extracted location, so whether a past prediction would change cannot be checked; `docs/results.md` would get a note, and a re-run is a separate decision. |
+| D32 | Which address replaces the corporate e-mail in the commits (D29)? | Phase 5, step 9 | The GitHub `noreply` address shown under Settings → Emails (`<id>+<username>@users.noreply.github.com`). |
 
 ## Decided
 
@@ -108,6 +110,16 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   paragraph in `docs/results.md`: no agent. The fixed workflow on `gemini-2.5-flash`
   with reasoning on is the version in use; the agent code stays in the repo for the
   comparison only.
+
+- D28 (2026-11-11): the GitHub repository is **public**. The pre-push check of Phase 5
+  step 9 therefore covers the posting texts and this plan as well as secrets.
+- D29 (2026-11-11): the corporate e-mail address must not be published. The author and
+  committer of every commit are rewritten before the first push (address: D32).
+- D30 (2026-11-11): the hook runs only when the edited file is `.py` or
+  `pyproject.toml`.
+- D31 (2026-11-11): the branch is renamed to `main` before the first push.
+- The candidate answered D28–D31 on 2026-11-11 without objecting to the Phase 5 plan;
+  Claude took that as approval of the plan.
 
 ## What the candidate does (Claude cannot)
 
@@ -923,18 +935,179 @@ or multi-turn conversation, parallel runs, the Phase 5 hook and README.
 
 ---
 
-## Phase 5 – Harness, harden, humans (roadmap)
+## Phase 5 – Harness, harden, humans (current)
 
-- Tests: positive + negative per rule, invalid JSON rejected by `schema.py`, ≥ 1 per
-  tool, all LLM calls mocked, no network.
-- Claude Code hook in `.claude/settings.json`: after `Edit`/`Write`, run
-  `uv run ruff check .` and `uv run pytest -q`.
-- `AGENTS.md` "Lessons learned" filled from real mistakes in Phases 1–4.
-- README: purpose, how to run, result tables, chosen model and why, and the statement
-  that the tool only recommends.
-- Push to GitHub after checking that no `.env`, key file or CV is tracked.
+Source: [PROCESS.md §5 Phase 5](PROCESS.md#phase-5--harness-harden-humans)
 
-**Done when:** tests and lint pass, the hook works, README is complete, code is on GitHub.
+State at the start (checked 2026-11-11): `ruff check` and `ruff format --check` clean;
+265 tests pass in 4.6 s (7.6 s wall time with `uv run`); no `.claude/` directory, so no
+hook; `README.md` is a 19-line stub; no git remote; the `gh` CLI is not installed;
+`.env`, `data/cv.md` and `data/results/` were never committed (checked with `git log
+--all`); the source has no code that sends, posts or opens anything besides the LLM
+calls; all 8 commits carry a corporate e-mail address as author (D29).
+
+Most of the tests PROCESS.md asks for were written with the code in Phases 1–4. This
+phase therefore audits them instead of rewriting them, and spends its effort on the
+parts that do not exist yet: the hook, a code review, the lessons, the README, GitHub.
+
+### Before the push (candidate)
+- [ ] Answer D28–D31.
+- [ ] Create an **empty** repository on github.com (no README, no licence, no
+      `.gitignore`, otherwise the first push is rejected) and give Claude its URL.
+- [ ] Approve the push after reading the pre-push check of step 9.
+
+Steps 1–8 need no decision except D30 (step 3) and no network.
+
+### Steps
+1. [x] Test audit. Write a table "requirement → existing test(s)" for the three
+       PROCESS.md bullets and add a test only where a cell is empty:
+       - `rules.py`: positive and negative per rule: location on-site/hybrid (D2),
+         location remote (D3), seniority, English flag; and at the `apply_rules`
+         level, an override by each rule alone. Known today: the override is tested
+         for location and for two rules together, not for seniority alone.
+       - `schema.py`: malformed JSON rejected (exists); also JSON of the wrong shape
+         (a list, `null`) if not covered.
+       - `tools.py`: every tool has at least one test (exists for all three).
+       - Mocking: confirm no test can reach the network. Add an autouse fixture in
+         `tests/conftest.py` that makes `llm._vertex_client` and the OpenAI client
+         constructor raise, so a future test that forgets to mock fails loudly
+         instead of spending credits.
+2. [x] Human-control guard. One test that the agent's tool set is exactly the three
+       PROCESS.md tools (exists) and one that the package's runtime dependencies in
+       `pyproject.toml` match an allow-list, so adding e.g. a browser-automation or
+       mail library requires a deliberate edit of the test. The guarantee itself is
+       stated in the README (step 7) and in `AGENTS.md` (already there).
+3. [x] Hook: `.claude/settings.json` (committed, so it works for anyone who clones)
+       with a `PostToolUse` hook on `Edit|Write`.
+       - It runs `.claude/hooks/post_edit_check.py` through `uv run python`: read the
+         hook JSON from stdin, skip unless the edited file is `.py` or
+         `pyproject.toml` (D30), run `uv run ruff check .` and `uv run pytest -q`.
+       - On failure it exits with code 2 and prints the tool output to stderr; that
+         is what Claude Code feeds back to the agent. On success it is silent.
+       - `ruff format` is **not** run by the hook: a formatter that rewrites a file
+         right after the agent edited it makes the agent's next edit fail on stale
+         text. Format stays a manual step before commit.
+       - The exact hook JSON shape and which shell runs it on Windows are read from
+         the Claude Code documentation at implementation time, not from memory.
+       - The script is pure standard library, has docstrings, and its file filter is
+         a small pure function with its own unit test.
+4. [x] Prove the hook works, and show the output: (a) edit a `.py` file so that ruff
+       fails → the hook reports it; (b) break a test expectation → the hook reports
+       it; (c) edit a Markdown file → nothing runs; then revert both. A hook added in
+       a running session may need the session restarted before it fires; if so, this
+       step is done right after a restart.
+5. [x] Code review, "even when tests pass". Read `src/job_fit/` module by module with
+       fresh eyes for: wrong behavior at the edges (substring matching of cities and
+       regions in `rules.py`, token accounting, the failure paths of D5 and D25),
+       personal data in logs or run files, secrets, dead code. Findings are listed
+       here with a verdict each. A confirmed bug gets a failing test first, then the
+       fix. Anything that would change model-facing text (prompts, schema or tool
+       descriptions) is **reported, not changed**: it would change the prompt hash
+       and make the Phase 3–4 numbers stale.
+6. [x] `AGENTS.md` – fill "Lessons learned" from real events in Phases 1–4, each as
+       "what went wrong → the rule that prevents it". Sources: the findings sections
+       of this file. Candidates: heredocs with apostrophes fail in the Bash tool;
+       only `uv run python` exists; `load_dotenv()` searches from the calling file;
+       an expected value computed by hand was wrong, so compute it from the cost
+       table; model ids and prices are looked up, never recalled; an aborted eval
+       run is repeated, never patched; no prompt change after seeing results; one
+       run is not a result on 21 postings. The file must stay short (PROCESS.md: 40
+       lines; it is 37 now), so the list is at most 8 one-line items and other
+       sections are tightened if needed. Add the hook to the Commands section.
+7. [x] `README.md`, written for someone who has never seen the project:
+       what it does and the three decisions; the **human-control statement** (it only
+       recommends; it never applies, sends messages or fills in forms); how it works
+       (workflow, rules in code, why rationale comes first); install and
+       configuration; how to run one posting, the eval and the comparison; the Phase
+       3 and Phase 4 tables copied from `docs/results.md` with a link to the full
+       text; the chosen model and why, and "no agent" and why, in a few sentences
+       each; limits (21 postings, 3 PREPARE, no local run); project layout; how it
+       was built with Claude Code (AGENTS.md, plan per phase, hook, review). No new
+       numbers: every figure comes from `docs/results.md`.
+8. [ ] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show
+       output. Commit `phase-5: harness, tests, hook, README`.
+9. [ ] GitHub.
+       - Pre-push check, output shown to the candidate: `git ls-files` reviewed for
+         `.env`, key files, `data/cv.md`, `data/results/`; a search of the whole
+         history for key-like strings (`AIza`, `sk-or-`, `private_key`, the project
+         id from `.env` compared by presence only, never printed); author addresses.
+       - Apply D29 (author rewrite if chosen) and D31 (branch name).
+       - `git remote add origin <url>`, then `git push -u origin <branch>` **only
+         after the candidate's explicit go-ahead**. Pushing publishes; it is the one
+         step of this project that cannot be taken back.
+       - Verify with `git ls-remote origin`.
+10. [ ] Update the status table and this section; commit and push the final status.
+
+### Results of steps 1–7 (2026-11-11)
+
+`ruff check` and `ruff format --check` clean; 296 tests pass (265 at the start).
+
+**Test audit (step 1)**
+
+| Requirement (PROCESS.md) | Covered by | Added in this phase |
+|---|---|---|
+| `rules.py`, location on-site/hybrid: positive, negative | `test_location_outside_allowed_area_is_violation`, `test_location_inside_allowed_area_passes` | – |
+| `rules.py`, location remote (D3): positive, negative | same two tests (remote rows) | override at `apply_rules` level |
+| `rules.py`, seniority: positive, negative | `test_intern_and_junior_roles_are_violation`, `test_other_seniorities_pass` | override by seniority alone at `apply_rules` level |
+| `rules.py`, English flag: positive, negative | `test_strong_english_requirement_is_detected`, `test_weak_or_absent_...` | – |
+| `schema.py`: invalid JSON rejected | `test_malformed_json_is_rejected` | JSON of the wrong shape (`[]`, `null`, a string, a number, empty) |
+| `tools.py`: at least 1 test per tool | 6 for `check_rules`, 3 for `get_cv_section`, 3 for `convert_currency` | – |
+| Anything that calls an LLM is mocked | fakes in every test module | `tests/conftest.py` refuses every socket connection |
+
+**Hook (steps 3–4).** `.claude/settings.json` + `.claude/hooks/post_edit_check.py`.
+Shown working in the session: an unused import was reported by ruff, a wrong test
+expectation by pytest, both fed back to the agent; edits of `AGENTS.md` and `README.md`
+ran nothing. The hook was picked up without restarting the session.
+
+**Code review (step 5).** Done by a separate agent that had not written the code, so it
+was not anchored on the author's assumptions. `metrics.py`, `dataset.py`, `schema.py`
+and the dominance logic of `compare.py` came out clean; no CV or posting text reaches
+logs or run files; no outward action besides the LLM call.
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| R1 | `llm._generate_vertex` caught only `APIError`; a timeout or connection error (plain `httpx` error after the SDK's retries) would crash a whole eval run and save nothing | confirmed | **fixed**, failing test first |
+| R2 | `rules._normalize` did not handle decomposed Unicode (`I` + combining dot, `u` + diaeresis): `İstanbul` or `Türkiye` in that form was treated as a blocked place, and the English keyword check missed `İngilizce` | confirmed | **fixed**, failing tests first; the English flag of all 21 postings is unchanged |
+| R3 | Remote rule fails closed: `Fully remote`, `Remote-first`, `Remote (Europe)`, `Remote (TR)`, `Remote (not specified)` are SKIP because any leftover word counts as a region not on the allow-list. Same shape for office work: `Not specified`, or `Türkiye` without a city, is SKIP | confirmed | **open, D33**: changes rule behavior |
+| R4 | Substring allow-list lets blocked places through: `Remote (Anywhere in the US)`, `Remote (Global, excluding Turkey)`, `Istanbul Street 5, Berlin` | confirmed | **open, D33** |
+| R5 | `prompt_sha256` covers the system prompt and the user template, not the `JobDecision` field descriptions, the retry note or the CV; two runs with a changed schema description or CV get the same hash | confirmed | reported; a fix changes every hash and makes the saved runs incomparable |
+| R6 | Tokens and latency of a failed posting are recorded as 0, so a model that fails often looks cheaper and can land on the Pareto front | confirmed | reported; no run in `docs/results.md` had a failed posting (known caveat since Phase 2) |
+| R7 | Three consecutive `LLMError`s abort the run and discard the completed postings; empty answers and 429s count as setup failures | plausible | reported |
+| R8 | `agent.py`: the `StructuredOutputError` branch cannot be reached with `ToolStrategy`'s default error handling; the step-limit branch handles the case | confirmed | reported; harmless |
+| R9 | `check_rules` tool answers "no violation" for an unrecognized `work_mode` such as `on-site` | confirmed | reported; the rules in code still decide; a typed argument would change the tool text the model sees |
+| R10 | A CV without `## ` headings gives the agent no sections and no error; a bare `## ` line matches every topic | confirmed | reported; agent is comparison-only (D27) |
+| R11 | Provider error text is copied into the saved `error` field and can contain the Google Cloud project id | plausible | reported; run files are git-ignored |
+| R12 | Prices are for `global`; with `GOOGLE_CLOUD_LOCATION` unset the default `us-central1` costs about 10% more than computed. English keyword check has false positives and negatives (`basic English` after `Strong Python`) | confirmed | reported; all table rows were run in `global` |
+
+**Deviations from the plan above**
+- The network guard blocks `socket.connect` instead of the SDK client constructors:
+  it covers every SDK at once, and two existing tests legitimately construct a real
+  (unconnected) OpenAI client.
+- `AGENTS.md` has 7 lessons, not 8, to stay at 40 lines.
+- Seen while working: the hook reports a failure between two edits of one change (a
+  name used before its import was added). Expected (see Risks); adding the import
+  first avoids it.
+
+**Done when:** all tests and lint pass, the hook is shown working, the README is
+complete, and the code is on GitHub.
+
+**Not in this phase:** prompt or schema changes, new eval runs, new features, CI on
+GitHub Actions (not asked for; the hook is the local check), the Phase 6 UI,
+relabeling the test set.
+
+**Risks**
+- The hook runs after every code edit (about 8 s). During a multi-file change the
+  tests are red between edits by design; the feedback is then noise the agent must
+  read correctly. Accepted: PROCESS.md asks for exactly this hook.
+- A hook is code that runs automatically on the candidate's machine. It is committed
+  and reviewed like any other code, and it only runs ruff and pytest.
+- The code review may find a bug whose fix changes results (e.g. in `rules.py`).
+  Then the affected numbers in `docs/results.md` are marked, and whether to re-run
+  is the candidate's decision, not made silently.
+- Posting texts are other companies' text. In a private repo that is not an issue;
+  for a public one it is part of D28.
+- Rewriting authors (D29) changes every commit hash; the hashes are not referenced
+  anywhere in the repo (the status table uses `git log --grep`), so nothing breaks.
 
 ---
 

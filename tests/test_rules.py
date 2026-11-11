@@ -1,5 +1,6 @@
 """Tests for the hard rules that override the LLM's decision."""
 
+import unicodedata
 from typing import Any
 
 import pytest
@@ -68,6 +69,28 @@ def test_location_inside_allowed_area_passes(location: str, work_mode: str) -> N
 @pytest.mark.parametrize(
     ("location", "work_mode"),
     [
+        # Decomposed forms: a base letter followed by a combining mark, as text copied
+        # from a PDF or lowercased with str.lower() can be.
+        (unicodedata.normalize("NFD", "İstanbul, Türkiye"), "onsite"),
+        ("İstanbul".lower() + ", Türkiye", "hybrid"),
+        (unicodedata.normalize("NFD", "Remote (Türkiye)"), "remote"),
+    ],
+)
+def test_decomposed_unicode_spellings_pass(location: str, work_mode: str) -> None:
+    """An allowed place is recognized however its accented letters are encoded."""
+    assert violated_rules(location, work_mode, "senior") == []
+
+
+def test_english_requirement_is_detected_in_decomposed_text() -> None:
+    """The keyword check reads decomposed Turkish text like composed text."""
+    posting_text = unicodedata.normalize("NFD", "İleri seviye İngilizce bilgisi")
+
+    assert has_english_risk(posting_text) is True
+
+
+@pytest.mark.parametrize(
+    ("location", "work_mode"),
+    [
         ("unknown", "onsite"),
         ("", "hybrid"),
         ("Bursa, Türkiye", "unknown"),
@@ -131,6 +154,27 @@ def test_location_violation_overrides_apply_and_tags_rationale() -> None:
     assert outcome.decision.decision == "SKIP"
     assert outcome.fired_rules == (RULE_LOCATION,)
     assert outcome.decision.rationale.endswith("[rule: location]")
+
+
+def test_seniority_violation_alone_overrides_apply_and_tags_rationale() -> None:
+    """An APPLY for a junior role in an allowed city becomes SKIP with a rule tag."""
+    llm_decision = _decision(seniority="junior")
+
+    outcome = apply_rules(llm_decision, NEUTRAL_POSTING)
+
+    assert outcome.decision.decision == "SKIP"
+    assert outcome.fired_rules == (RULE_SENIORITY,)
+    assert outcome.decision.rationale.endswith("[rule: seniority]")
+
+
+def test_remote_role_closed_to_turkiye_overrides_apply() -> None:
+    """An APPLY for a remote role open only to another country becomes SKIP (D3)."""
+    llm_decision = _decision(location="Remote (US only)", work_mode="remote")
+
+    outcome = apply_rules(llm_decision, NEUTRAL_POSTING)
+
+    assert outcome.decision.decision == "SKIP"
+    assert outcome.fired_rules == (RULE_LOCATION,)
 
 
 def test_two_violations_are_both_recorded() -> None:

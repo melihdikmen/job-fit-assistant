@@ -5,6 +5,7 @@ Everything here is a pure function: values in, values out, no I/O and no LLM.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from job_fit.schema import JobDecision
@@ -75,7 +76,12 @@ def _normalize(text: str) -> str:
     Returns:
         The text in a form where "İstanbul", "ISTANBUL" and "istanbul" are equal.
     """
-    return text.translate(_TURKISH_CHAR_MAP).casefold()
+    # Decompose first, so that a letter typed as one character and the same letter
+    # stored as base letter + combining mark (common in text copied from a PDF) end up
+    # equal; then drop the marks. The map still handles "ı", which has no decomposition.
+    decomposed = unicodedata.normalize("NFKD", text)
+    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return without_marks.translate(_TURKISH_CHAR_MAP).casefold()
 
 
 def _remote_region(normalized_location: str) -> str:
