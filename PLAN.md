@@ -10,7 +10,7 @@
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
-| 6 – UI (optional) | 🟡 | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; committed, **push waits for the candidate's go-ahead** (D37) |
+| 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
 
@@ -1142,7 +1142,7 @@ relabeling the test set.
 
 ---
 
-## Phase 6 – UI, optional (in progress)
+## Phase 6 – UI, optional (done)
 
 Source: [PROCESS.md §5 Phase 6](PROCESS.md#phase-6--optional-ui): "Gradio: paste a
 posting, choose model and version (workflow/agent), see the `JobDecision` and the cost."
@@ -1215,7 +1215,7 @@ the prompt hashes and every number in `docs/results.md` stay valid.
 8. [x] `README.md`: a short "Web page" section (how to start it, what it shows, that it
        is local-only and only recommends). `AGENTS.md`: `ui` in the folder line and
        the run command, staying within 40 lines.
-9. [~] `ruff format`, commit `phase-6: gradio ui`, update the status table; push only
+9. [x] `ruff format`, commit `phase-6: gradio ui`, update the status table; push only
        after the pre-push check and the candidate's go-ahead (D37).
 
 ### Results (2026-11-11)
@@ -1252,8 +1252,10 @@ local API with `data/samples/izmir-senior-software-engineer.txt`, default model.
   none besides `127.0.0.1`. During a decision: `aiplatform.googleapis.com` and
   `oauth2.googleapis.com` (the model call). The test client used to drive the page
   (`gradio_client`) looks up `huggingface.co` on its own; the app does not.
-- The page was not looked at in a browser by Claude; layout and readability are for
-  the candidate to judge.
+- Claude did not look at the page in a browser; the candidate opened it, ran a
+  posting and confirmed it works (2026-11-11).
+- Pushed to GitHub on the candidate's go-ahead after the pre-push check (no `.env`,
+  CV, run file or key-like string; `noreply` author); verified with `git ls-remote`.
 
 **Deviations from the plan above**
 - `run_decision` takes `load_cv` (a function returning the CV text) and `decide_fns`;
