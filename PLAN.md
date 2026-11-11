@@ -8,7 +8,7 @@
 | 1 – Structured output | ✅ | see `git log --grep phase-1` | `gemini-2.5-flash` on Vertex; 3 samples run live; 75 tests |
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
-| 4 – Agent | 🟡 | see `git log --grep phase-4` | code, runs and table done: workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings); **open: candidate confirms the "Is an agent needed" paragraph**; 265 tests |
+| 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ⬜ | | |
 | 6 – UI (optional) | ⬜ | | |
 
@@ -24,7 +24,6 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D27 | Does the candidate confirm the "Is an agent needed for this problem?" paragraph in `docs/results.md`? | closing Phase 4 | Confirm or edit it; then the paragraph's "not yet confirmed" note is replaced, the status row goes to ✅ and a `phase-4: confirm agent conclusion` commit is made. |
 
 ## Decided
 
@@ -104,6 +103,11 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   the agent's failures inside the agent's numbers.
 - D26 (2026-11-11): `convert_currency` uses a fixed, dated rate in named constants,
   stated in the tool description and in `docs/results.md`.
+
+- D27 (2026-11-11): the candidate confirmed the "Is an agent needed for this problem?"
+  paragraph in `docs/results.md`: no agent. The fixed workflow on `gemini-2.5-flash`
+  with reasoning on is the version in use; the agent code stays in the repo for the
+  comparison only.
 
 ## What the candidate does (Claude cannot)
 
@@ -690,7 +694,7 @@ rows), per-model prompts, parallel or batch calls, agent, UI, a fourth provider 
 
 ---
 
-## Phase 4 – Agent version (current)
+## Phase 4 – Agent version (done)
 
 Source: [PROCESS.md §5 Phase 4](PROCESS.md#phase-4--agent-version)
 
@@ -868,7 +872,7 @@ the smoke run.
 
 ### Findings to carry into Phase 5
 
-- Conclusion (drafted, to be confirmed by the candidate): an agent is not needed. The
+- Conclusion (confirmed, D27): an agent is not needed. The
   agent made the same tool calls in the same order on every posting, cost 18% more, took
   24% longer and was far less stable (its two runs disagree on 8 of 21 postings, the
   workflow's on 2). Accuracy does not separate the versions.

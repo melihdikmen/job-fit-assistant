@@ -193,7 +193,7 @@ Tool usage was identical in both runs, call for call:
 
 ### Is an agent needed for this problem?
 
-_Drafted by Claude from the numbers above; not yet confirmed by the candidate._
+_Drafted by Claude from the numbers above and confirmed by the candidate on 2026-11-11._
 
 No. An agent earns its cost when the steps cannot be known in advance: when what to look
 up next depends on what the last lookup returned. This task is not like that. Every
