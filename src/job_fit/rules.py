@@ -19,9 +19,26 @@ OFFICE_WORK_MODES = frozenset({"onsite", "hybrid"})
 BLOCKED_SENIORITIES = frozenset({"intern", "junior"})
 
 # Match data below is compared against normalized text (see _normalize), so it is
-# written lowercase and without Turkish diacritics.
-ALLOWED_CITIES = ("ankara", "istanbul")
-REMOTE_ALLOWED_REGIONS = ("turkiye", "turkey", "worldwide", "global", "anywhere", "emea")
+# written lowercase and without Turkish diacritics. Names are matched as whole words:
+# "istanbul" must not match "Istanbulska", nor "turkey" a longer word.
+ALLOWED_CITIES = frozenset({"ankara", "istanbul"})
+TURKIYE_NAMES = frozenset({"turkiye", "turkey", "tr"})
+# Regions a remote role can be limited to that still include the candidate. "europe"
+# is ambiguous for a candidate in Türkiye; an ambiguous region does not force a SKIP.
+REMOTE_ALLOWED_REGIONS = TURKIYE_NAMES | frozenset({"emea", "europe"})
+# Words that say Türkiye is left out when they appear next to its name.
+EXCLUSION_WORDS = frozenset({"excluding", "except", "excl", "not", "outside", "no", "without"})
+# Words that name no place. A location made only of these is unknown or unrestricted
+# ("Fully remote", "Remote (Worldwide)", "Not specified"), and unknown never violates.
+NON_PLACE_WORDS = frozenset(
+    {
+        "remote", "remotely", "uzaktan", "hybrid", "onsite", "fully", "full", "part",
+        "time", "first", "home", "office", "work", "working", "based", "only", "from",
+        "in", "the", "of", "within", "and", "or", "available", "not", "specified",
+        "unspecified", "n", "a", "na", "tbd", "worldwide", "global", "globally",
+        "anywhere",
+    }
+)  # fmt: skip
 
 # A strength word close to the language name, in either order, within one sentence.
 # English and Turkish phrasings are both covered because postings come in both.
@@ -84,19 +101,31 @@ def _normalize(text: str) -> str:
     return without_marks.translate(_TURKISH_CHAR_MAP).casefold()
 
 
-def _remote_region(normalized_location: str) -> str:
-    """Extract the region a remote role is open to.
+def _place_words(location: str) -> frozenset[str]:
+    """Reduce a location to the words that can name a place.
 
     Args:
-        normalized_location: Normalized location, e.g. "remote (us only)".
+        location: Location as extracted from the posting, e.g. "Remote (US only)".
 
     Returns:
-        The region words without the word "remote" and punctuation, e.g. "us only".
-        Empty if the location names no region.
+        The normalized words of the location without filler such as "remote", "only"
+        or "worldwide", e.g. {"us"}. Empty if the location names no place.
     """
-    without_remote = normalized_location.replace(REMOTE, " ")
-    letters_only = re.sub(r"[^a-z]+", " ", without_remote)
-    return letters_only.strip()
+    words = re.findall(r"[a-z]+", _normalize(location))
+    return frozenset(words) - NON_PLACE_WORDS
+
+
+def _excludes_turkiye(location: str) -> bool:
+    """Tell whether a location says that Türkiye is left out.
+
+    Args:
+        location: Location as extracted from the posting.
+
+    Returns:
+        True for wording such as "Global, excluding Turkey".
+    """
+    words = frozenset(re.findall(r"[a-z]+", _normalize(location)))
+    return bool(words & TURKIYE_NAMES) and bool(words & EXCLUSION_WORDS)
 
 
 def _violates_location(location: str, work_mode: str) -> bool:
@@ -107,20 +136,21 @@ def _violates_location(location: str, work_mode: str) -> bool:
         work_mode: One of "remote", "hybrid", "onsite", "unknown".
 
     Returns:
-        True if the job is on-site or hybrid outside the allowed cities, or remote
-        but not open to Türkiye. Unknown location or work mode never violates.
+        True if the job is on-site or hybrid in a named place other than the allowed
+        cities, or remote and limited to a named region that leaves Türkiye out. A
+        location that names no place, an office location that names only the country,
+        and an unknown work mode never violate.
     """
-    place = _normalize(location).strip()
-    if not place or UNKNOWN in place:
+    if UNKNOWN in _normalize(location):
         return False
+    places = _place_words(location)
     if work_mode in OFFICE_WORK_MODES:
-        return not any(city in place for city in ALLOWED_CITIES)
+        named_places = places - TURKIYE_NAMES
+        return bool(named_places) and not named_places & ALLOWED_CITIES
     if work_mode == REMOTE:
-        region = _remote_region(place)
-        if not region:
-            return False
-        accepted = (*REMOTE_ALLOWED_REGIONS, *ALLOWED_CITIES)
-        return not any(name in region for name in accepted)
+        if _excludes_turkiye(location):
+            return True
+        return bool(places) and not places & (REMOTE_ALLOWED_REGIONS | ALLOWED_CITIES)
     return False
 
 

@@ -69,6 +69,68 @@ def test_location_inside_allowed_area_passes(location: str, work_mode: str) -> N
 @pytest.mark.parametrize(
     ("location", "work_mode"),
     [
+        ("Fully remote", "remote"),
+        ("Remote-first", "remote"),
+        ("Remote, full-time", "remote"),
+        ("Remote / Home office", "remote"),
+        ("Remote (not specified)", "remote"),
+        ("Remote (N/A)", "remote"),
+        ("Uzaktan", "remote"),
+        ("Remote (TR)", "remote"),
+        ("Remote (Europe)", "remote"),
+        ("Not specified", "onsite"),
+        ("N/A", "hybrid"),
+        ("Türkiye", "hybrid"),
+        ("Turkey", "onsite"),
+    ],
+)
+def test_location_without_a_recognizable_place_never_violates(
+    location: str, work_mode: str
+) -> None:
+    """Wording that names no place, or only the country, is unknown, not a violation.
+
+    Skipping a good job is the costliest error, so the rule fires only on a place it
+    can read.
+    """
+    assert violated_rules(location, work_mode, "senior") == []
+
+
+@pytest.mark.parametrize(
+    ("location", "work_mode"),
+    [
+        ("Remote (Anywhere in the US)", "remote"),
+        ("Remote (Global, excluding Turkey)", "remote"),
+        ("Remote (US only, not available in Turkey)", "remote"),
+        ("Remote (Worldwide except Türkiye)", "remote"),
+        ("Remote (Germany or Turkmenistan)", "remote"),
+        ("Istanbulska, Bulgaria", "onsite"),
+        ("Frankfurt, Germany", "hybrid"),
+    ],
+)
+def test_allowed_names_inside_other_wording_do_not_pass(location: str, work_mode: str) -> None:
+    """An allowed name counts only as a whole word and not when Türkiye is excluded."""
+    assert violated_rules(location, work_mode, "senior") == [RULE_LOCATION]
+
+
+@pytest.mark.parametrize(
+    ("location", "work_mode"),
+    [
+        ("Izmir or Istanbul, Türkiye", "hybrid"),
+        ("Maslak, İstanbul", "onsite"),
+        ("İstanbul'da", "onsite"),
+        ("Remote (Anywhere)", "remote"),
+        ("Remote (Global)", "remote"),
+        ("Remote (EMEA)", "remote"),
+    ],
+)
+def test_allowed_place_among_other_words_passes(location: str, work_mode: str) -> None:
+    """An allowed city or region passes when it appears as a word of its own."""
+    assert violated_rules(location, work_mode, "senior") == []
+
+
+@pytest.mark.parametrize(
+    ("location", "work_mode"),
+    [
         # Decomposed forms: a base letter followed by a combining mark, as text copied
         # from a PDF or lowercased with str.lower() can be.
         (unicodedata.normalize("NFD", "İstanbul, Türkiye"), "onsite"),

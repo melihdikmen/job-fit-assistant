@@ -9,7 +9,7 @@
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
-| 5 – Harden | 🟡 | see `git log --grep phase-5` | steps 1–8 done and committed (296 tests, hook working, README, 2 review fixes); open: D33 (rule findings), then the push, which waits for D32 and the repo URL |
+| 5 – Harden | 🟡 | see `git log --grep phase-5` | steps 1–8 done and committed (322 tests, hook working, README, 4 review fixes incl. the location rule, D33); open: the push, which waits for the repo URL (D32) |
 | 6 – UI (optional) | ⬜ | | |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
@@ -24,8 +24,7 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D33 | Review findings R3 and R4: make the location rule match whole words and treat a location without a recognizable place as unknown (no override)? | Phase 5, before step 10 | Yes for R3 (it is the costliest error, a good job skipped, and contradicts "unknown never overrides"); R4 by matching whole words and rejecting "excluding / not" phrasings. The saved runs do not store the extracted location, so whether a past prediction would change cannot be checked; `docs/results.md` would get a note, and a re-run is a separate decision. |
-| D32 | Which address replaces the corporate e-mail in the commits (D29)? | Phase 5, step 9 | The GitHub `noreply` address shown under Settings → Emails (`<id>+<username>@users.noreply.github.com`). |
+| D32 | The GitHub repository URL. It gives the account name, from which the `noreply` author address is built (`<username>@users.noreply.github.com`). | Phase 5, step 9 | The candidate creates an empty public repository and pastes its URL; the login happens in the browser when Git asks for it at the first push. |
 
 ## Decided
 
@@ -118,6 +117,10 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 - D30 (2026-11-11): the hook runs only when the edited file is `.py` or
   `pyproject.toml`.
 - D31 (2026-11-11): the branch is renamed to `main` before the first push.
+- D33 (2026-11-11): fix review findings R3 and R4 in the location rule. Claude's choices
+  inside that decision: `Remote (Europe)` does not force a SKIP (ambiguous for a
+  candidate in Türkiye, and a skipped good job is the costliest error); a district
+  without its city (`Levent`) still counts as a place outside the allowed cities.
 - The candidate answered D28–D31 on 2026-11-11 without objecting to the Phase 5 plan;
   Claude took that as approval of the plan.
 
@@ -1040,7 +1043,7 @@ Steps 1–8 need no decision except D30 (step 3) and no network.
 
 ### Results of steps 1–7 (2026-11-11)
 
-`ruff check` and `ruff format --check` clean; 296 tests pass (265 at the start).
+`ruff check` and `ruff format --check` clean; 322 tests pass (265 at the start).
 
 **Test audit (step 1)**
 
@@ -1068,8 +1071,8 @@ logs or run files; no outward action besides the LLM call.
 |---|---|---|---|
 | R1 | `llm._generate_vertex` caught only `APIError`; a timeout or connection error (plain `httpx` error after the SDK's retries) would crash a whole eval run and save nothing | confirmed | **fixed**, failing test first |
 | R2 | `rules._normalize` did not handle decomposed Unicode (`I` + combining dot, `u` + diaeresis): `İstanbul` or `Türkiye` in that form was treated as a blocked place, and the English keyword check missed `İngilizce` | confirmed | **fixed**, failing tests first; the English flag of all 21 postings is unchanged |
-| R3 | Remote rule fails closed: `Fully remote`, `Remote-first`, `Remote (Europe)`, `Remote (TR)`, `Remote (not specified)` are SKIP because any leftover word counts as a region not on the allow-list. Same shape for office work: `Not specified`, or `Türkiye` without a city, is SKIP | confirmed | **open, D33**: changes rule behavior |
-| R4 | Substring allow-list lets blocked places through: `Remote (Anywhere in the US)`, `Remote (Global, excluding Turkey)`, `Istanbul Street 5, Berlin` | confirmed | **open, D33** |
+| R3 | Remote rule fails closed: `Fully remote`, `Remote-first`, `Remote (Europe)`, `Remote (TR)`, `Remote (not specified)` are SKIP because any leftover word counts as a region not on the allow-list. Same shape for office work: `Not specified`, or `Türkiye` without a city, is SKIP | confirmed | **fixed** (D33), failing tests first: a location that names no place, or only the country, is unknown |
+| R4 | Substring allow-list lets blocked places through: `Remote (Anywhere in the US)`, `Remote (Global, excluding Turkey)`, `Istanbul Street 5, Berlin` | confirmed | **fixed** (D33), failing tests first: whole-word matching, and wording that excludes Türkiye violates. `Istanbul Street 5, Berlin` still passes: a street named after an allowed city cannot be told from the city without a gazetteer |
 | R5 | `prompt_sha256` covers the system prompt and the user template, not the `JobDecision` field descriptions, the retry note or the CV; two runs with a changed schema description or CV get the same hash | confirmed | reported; a fix changes every hash and makes the saved runs incomparable |
 | R6 | Tokens and latency of a failed posting are recorded as 0, so a model that fails often looks cheaper and can land on the Pareto front | confirmed | reported; no run in `docs/results.md` had a failed posting (known caveat since Phase 2) |
 | R7 | Three consecutive `LLMError`s abort the run and discard the completed postings; empty answers and 429s count as setup failures | plausible | reported |
@@ -1078,6 +1081,11 @@ logs or run files; no outward action besides the LLM call.
 | R10 | A CV without `## ` headings gives the agent no sections and no error; a bare `## ` line matches every topic | confirmed | reported; agent is comparison-only (D27) |
 | R11 | Provider error text is copied into the saved `error` field and can contain the Google Cloud project id | plausible | reported; run files are git-ignored |
 | R12 | Prices are for `global`; with `GOOGLE_CLOUD_LOCATION` unset the default `us-central1` costs about 10% more than computed. English keyword check has false positives and negatives (`basic English` after `Strong Python`) | confirmed | reported; all table rows were run in `global` |
+
+**Location rule after D33.** `docs/results.md` carries a note that its runs used the
+earlier rule. In all saved runs the location rule fired on one posting only (Bursa,
+on-site), which still fires; run files do not store the extracted location, so the
+other direction cannot be checked. No re-run was made.
 
 **Deviations from the plan above**
 - The network guard blocks `socket.connect` instead of the SDK client constructors:

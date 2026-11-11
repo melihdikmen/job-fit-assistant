@@ -2,6 +2,15 @@
 
 Costs use list prices per token, even when credits pay.
 
+> **Note (2026-11-11, after all runs below).** A code review in Phase 5 changed the
+> location rule in `rules.py`: names are matched as whole words, a location that names
+> no place (`Fully remote`, `Not specified`, the country alone) is treated as unknown,
+> and wording that excludes Türkiye (`Global, excluding Turkey`) is a violation. The
+> runs below were made with the earlier rule and were not repeated. In those runs the
+> location rule fired on one posting only (on-site in Bursa), and it still fires on it.
+> Whether the new rule would fire anywhere else cannot be checked, because run files
+> do not store the location the model extracted.
+
 ## Model comparison (Phase 3)
 
 Runs of 2026-11-10 on the 21 labeled postings (APPLY 6, PREPARE 3, SKIP 12), same
