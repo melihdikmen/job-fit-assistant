@@ -9,7 +9,7 @@
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
-| 5 – Harden | 🟡 | | plan approved 2026-11-11; steps 1–8 in progress; push waits for D32 and the repo URL |
+| 5 – Harden | 🟡 | see `git log --grep phase-5` | steps 1–8 done and committed (296 tests, hook working, README, 2 review fixes); open: D33 (rule findings), then the push, which waits for D32 and the repo URL |
 | 6 – UI (optional) | ⬜ | | |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
@@ -1024,7 +1024,7 @@ Steps 1–8 need no decision except D30 (step 3) and no network.
        each; limits (21 postings, 3 PREPARE, no local run); project layout; how it
        was built with Claude Code (AGENTS.md, plan per phase, hook, review). No new
        numbers: every figure comes from `docs/results.md`.
-8. [ ] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show
+8. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show
        output. Commit `phase-5: harness, tests, hook, README`.
 9. [ ] GitHub.
        - Pre-push check, output shown to the candidate: `git ls-files` reviewed for
