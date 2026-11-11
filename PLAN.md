@@ -9,7 +9,7 @@
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
-| 5 – Harden | 🟡 | see `git log --grep phase-5` | steps 1–8 done and committed (322 tests, hook working, README, 4 review fixes incl. the location rule, D33); open: the push, which waits for the repo URL (D32) |
+| 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ⬜ | | |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
@@ -24,7 +24,6 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D32 | The GitHub repository URL. It gives the account name, from which the `noreply` author address is built (`<username>@users.noreply.github.com`). | Phase 5, step 9 | The candidate creates an empty public repository and pastes its URL; the login happens in the browser when Git asks for it at the first push. |
 
 ## Decided
 
@@ -121,6 +120,10 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   inside that decision: `Remote (Europe)` does not force a SKIP (ambiguous for a
   candidate in Türkiye, and a skipped good job is the costliest error); a district
   without its city (`Levent`) still counts as a place outside the allowed cities.
+- D32 (2026-11-11): at the candidate's request Claude created the repository itself
+  (`job-fit-assistant`, public, empty) through the GitHub API, with the token of the
+  candidate's browser login in Git Credential Manager. The commit author is the
+  account's GitHub `noreply` address.
 - The candidate answered D28–D31 on 2026-11-11 without objecting to the Phase 5 plan;
   Claude took that as approval of the plan.
 
@@ -938,7 +941,7 @@ or multi-turn conversation, parallel runs, the Phase 5 hook and README.
 
 ---
 
-## Phase 5 – Harness, harden, humans (current)
+## Phase 5 – Harness, harden, humans (done)
 
 Source: [PROCESS.md §5 Phase 5](PROCESS.md#phase-5--harness-harden-humans)
 
@@ -954,10 +957,9 @@ phase therefore audits them instead of rewriting them, and spends its effort on 
 parts that do not exist yet: the hook, a code review, the lessons, the README, GitHub.
 
 ### Before the push (candidate)
-- [ ] Answer D28–D31.
-- [ ] Create an **empty** repository on github.com (no README, no licence, no
-      `.gitignore`, otherwise the first push is rejected) and give Claude its URL.
-- [ ] Approve the push after reading the pre-push check of step 9.
+- [x] Answer D28–D31.
+- [x] Repository created by Claude at the candidate's request (D32).
+- [x] Approve the push after reading the pre-push check of step 9.
 
 Steps 1–8 need no decision except D30 (step 3) and no network.
 
@@ -1029,7 +1031,7 @@ Steps 1–8 need no decision except D30 (step 3) and no network.
        numbers: every figure comes from `docs/results.md`.
 8. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show
        output. Commit `phase-5: harness, tests, hook, README`.
-9. [ ] GitHub.
+9. [x] GitHub.
        - Pre-push check, output shown to the candidate: `git ls-files` reviewed for
          `.env`, key files, `data/cv.md`, `data/results/`; a search of the whole
          history for key-like strings (`AIza`, `sk-or-`, `private_key`, the project
@@ -1039,7 +1041,7 @@ Steps 1–8 need no decision except D30 (step 3) and no network.
          after the candidate's explicit go-ahead**. Pushing publishes; it is the one
          step of this project that cannot be taken back.
        - Verify with `git ls-remote origin`.
-10. [ ] Update the status table and this section; commit and push the final status.
+10. [x] Update the status table and this section; commit and push the final status.
 
 ### Results of steps 1–7 (2026-11-11)
 
@@ -1086,6 +1088,15 @@ logs or run files; no outward action besides the LLM call.
 earlier rule. In all saved runs the location rule fired on one posting only (Bursa,
 on-site), which still fires; run files do not store the extracted location, so the
 other direction cannot be checked. No re-run was made.
+
+**GitHub (step 9).** Pre-push check on `main`: no `.env`, CV, run file, label notes
+or key file tracked; no key-like string in the history (the one match is the line of
+this plan that names the search patterns); the Google Cloud project id is not in the
+history. Author and committer of all commits were rewritten to the `noreply`
+address; the first commit also carried a corporate user name as author name, which
+the first check had missed and the second caught. Branch renamed to `main`, pushed
+after the candidate's go-ahead, verified with `git ls-remote`. The commit hashes
+changed with the rewrite.
 
 **Deviations from the plan above**
 - The network guard blocks `socket.connect` instead of the SDK client constructors:
