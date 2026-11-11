@@ -24,7 +24,6 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
-| D22 | Confirm the list prices of `gemini-4-carbon` (2.00 / 10.00) and `gemini-3.1-flash-lite` (0.25 / 1.50) on the Vertex AI pricing page in a browser. | before the README (Phase 5) | If they differ, correct `pricing.py`; cost per 100 postings can be recomputed from the saved token counts without new runs |
 
 ## Decided
 
@@ -86,6 +85,12 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 - D21 (2026-11-10): the candidate confirmed the "Which model I chose and why" paragraph
   in `docs/results.md`. The chosen configuration is `gemini-2.5-flash` with reasoning
   on; Phase 4 compares workflow and agent on it.
+
+- D22 (2026-11-11): the candidate could not find the prices; Claude read them from the
+  raw HTML of the Vertex AI pricing page. Global, standard tier, per 1M tokens:
+  `gemini-4-carbon` 2.00 / 10.00 through 2026-11-30 (promotional, 50% credits back), then
+  4.00 / 20.00; `gemini-3.1-flash-lite` 0.25 / 1.50; `gemini-2.5-flash` 0.30 / 2.50. All
+  match `pricing.py`, so no number in `docs/results.md` changed.
 
 ## What the candidate does (Claude cannot)
 
@@ -496,11 +501,8 @@ Listed with `client.models.list()` in `global` and probed with a one-word reques
 | O – open-weight | `nvidia/nemotron-3.5-super-vl:free` (120B total, 12B active) | openrouter, pinned to `nvidia` | default | 0 |
 | O2 – small open-weight | `liquid/lfm-3-1.7b:free` (1.7B) | openrouter, pinned to `liquid` | default | 0 |
 
-- Price sources: `gemini-2.5-flash` from the Vertex AI pricing page (Phase 2). The other
-  two Gemini prices are from the Gemini Developer API pricing page
-  (https://aistudio.google.com/docs/pricing, Standard tier, quoted verbatim); the Vertex
-  AI pricing page could not be read on 2026-11-10, so they are **not confirmed for
-  Vertex AI**. The candidate should check them in a browser.
+- Price sources: all three Gemini prices are confirmed on the Vertex AI pricing page
+  (Global region, standard tier), see D22.
 - D8: not tested. No Claude model is used in this phase (D17), so the question no
   longer affects anything; it is dropped.
 - O2 was chosen as the size that would actually fit this machine (3 GB VRAM), which

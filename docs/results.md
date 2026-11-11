@@ -15,7 +15,7 @@ The rows with numbers are generated from the run files with
 | Model | Accuracy | Weighted error (mean) | Cost per 100 postings | Avg. latency | Notes |
 |---|---|---|---|---|---|
 | Baseline | 57.1% | 1.14 | $0.00 | 0.0 s | always SKIP |
-| A, strong: gemini-4-carbon | 66.7% | 0.62 | $1.75 | 57.3 s | thinking cannot be switched off; introductory price, doubles on 2026-12-01 |
+| A, strong: gemini-4-carbon | 66.7% | 0.62 | $1.75 | 57.3 s | thinking cannot be switched off; promotional price, doubles on 2026-12-01 |
 | B, mid: gemini-2.5-flash (reasoning off) | 52.4% | 0.48 | $0.16 | 2.6 s | |
 | B again: gemini-2.5-flash (reasoning off), run 2 | 47.6% | 0.52 | $0.16 | 2.6 s | repeat, to measure noise |
 | C, cheap: gemini-3.1-flash-lite | 52.4% | 0.48 | $0.10 | 1.7 s | Pareto front |
@@ -58,10 +58,10 @@ No call failed and no answer needed a schema retry in any of the five runs.
 - Three APPLY postings (Miny, A1 Mobile, Rubikpara) are rated lower by every model. That
   is either a shared blind spot of the prompt or a sign the labels deserve a second look.
 - PREPARE has 3 examples; nothing can be said about that class.
-- Prices: `gemini-2.5-flash` is from the Vertex AI pricing page. The prices of
-  `gemini-4-carbon` and `gemini-3.1-flash-lite` are from the Gemini Developer API pricing
-  page; the Vertex AI page could not be read on the day, so they are not confirmed to be
-  the same on Vertex AI.
+- Prices are the Vertex AI list prices for the Global region, standard tier, read from
+  the Vertex AI pricing page on 2026-11-11. `gemini-4-carbon` is at a promotional price
+  through 2026-11-30 (2.00 / 10.00 per 1M tokens, given as 50% credits back); at its
+  regular price (4.00 / 20.00) the row would cost $3.50 per 100 postings.
 - Latency was measured once per posting from one home connection.
 
 ### Local model memory estimate

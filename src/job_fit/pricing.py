@@ -9,7 +9,7 @@ from dataclasses import dataclass
 TOKENS_PER_MILLION = 1_000_000
 
 # Date the table below was last compared with the providers' pricing pages.
-PRICES_CHECKED_ON = "2026-11-10"
+PRICES_CHECKED_ON = "2026-11-11"
 
 # A model run on the candidate's own machine has no price per token (electricity and
 # hardware are not counted).
@@ -34,12 +34,11 @@ FREE = ModelPrice(input_usd_per_million=0.0, output_usd_per_million=0.0)
 # Standard (non-batch) text prices, keyed by (provider, model id): the same model can
 # cost differently on another provider. Gemini prices are tiered by prompt size; the
 # tier below 200k prompt tokens applies, since prompts here are about 2.3k tokens.
-# Source for gemini-2.5-flash: https://cloud.google.com/vertex-ai/generative-ai/pricing
-# Source for the other Gemini models: https://aistudio.google.com/docs/pricing (Gemini
-# Developer API, Standard tier). The Vertex AI page could not be read on the day of the
-# check, so these two prices are not confirmed to be identical on Vertex AI.
-# gemini-4-carbon is at an introductory price through 2026-11-30; from 2026-12-01 it
-# is 4.00 / 20.00.
+# Source for Gemini: the Vertex AI pricing page, standard tier, Global region (runs use
+# the global location; other regions cost 10% more), read on 2026-11-11:
+# https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+# gemini-4-carbon is at a promotional price through 2026-11-30 (given as 50% credits
+# back on spend); from 2026-12-01 it is 4.00 / 20.00.
 # Source for OpenRouter: https://openrouter.ai/models (free variants are listed at 0).
 PRICES_USD_PER_MILLION_TOKENS: dict[tuple[str, str], ModelPrice] = {
     ("vertex", "gemini-2.5-flash"): ModelPrice(
