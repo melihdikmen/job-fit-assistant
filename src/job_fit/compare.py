@@ -5,7 +5,8 @@ Run it with::
     uv run python -m job_fit.compare data/results/<run>.json data/results/<run>.json ...
 
 It prints a Markdown table (one row per run, plus the majority baseline) and marks the
-runs on the Pareto front of weighted error, cost and latency.
+runs on the Pareto front of weighted error, cost and latency. With ``--table versions``
+it prints the workflow-vs-agent table instead.
 """
 
 import argparse
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from job_fit.eval import COST_REPORT_UNIT, EvalReport
+from job_fit.eval import COST_REPORT_UNIT, DEFAULT_VERSION, EvalReport
 from job_fit.workflow import DEFAULT_REASONING
 
 VERTEX_PROVIDER = "vertex"
@@ -28,6 +29,14 @@ TABLE_HEADER = (
     f"Cost per {COST_REPORT_UNIT} postings | Avg. latency | Notes |"
 )
 TABLE_DIVIDER = "|---|---|---|---|---|---|"
+VERSION_TABLE_HEADER = (
+    "| Version | Accuracy | Weighted error (mean) | "
+    f"Cost per {COST_REPORT_UNIT} postings | Avg. latency | Avg. model calls | Avg. tool calls |"
+)
+VERSION_TABLE_DIVIDER = "|---|---|---|---|---|---|---|"
+MODELS_TABLE = "models"
+VERSIONS_TABLE = "versions"
+TABLES = (MODELS_TABLE, VERSIONS_TABLE)
 
 
 class CompareError(RuntimeError):
@@ -78,13 +87,20 @@ def load_runs(paths: Sequence[Path]) -> list[EvalReport]:
         except ValidationError as err:
             raise CompareError(f"{path} is not a valid run file: {err}") from err
 
-    def fingerprint(report: EvalReport) -> tuple[str, str, int]:
-        """Return what must be equal for two runs to be comparable."""
-        return (report.dataset_sha256, report.prompt_sha256, report.dataset_size)
-
-    reference = fingerprint(reports[0])
+    reference = reports[0]
+    # The workflow and the agent have different prompts by design, so the prompt has to
+    # match only among runs of the same version.
+    prompt_by_version: dict[str, str] = {}
     for path, report in zip(paths, reports, strict=True):
-        if fingerprint(report) != reference:
+        same_set = (report.dataset_sha256, report.dataset_size) == (
+            reference.dataset_sha256,
+            reference.dataset_size,
+        )
+        same_prompt = (
+            prompt_by_version.setdefault(report.version, report.prompt_sha256)
+            == report.prompt_sha256
+        )
+        if not (same_set and same_prompt):
             raise CompareError(
                 f"{path} used a different test set, prompt or number of postings than "
                 f"{paths[0]}; the runs are not comparable."
@@ -99,11 +115,12 @@ def _run_name(report: EvalReport) -> str:
         report: Report of the run.
 
     Returns:
-        E.g. "gemini-2.5-flash (reasoning off)".
+        E.g. "gemini-2.5-flash (reasoning off)" or "gemini-2.5-flash (agent, reasoning on)".
     """
-    if report.reasoning == DEFAULT_REASONING:
-        return report.model
-    return f"{report.model} (reasoning {report.reasoning})"
+    details = [] if report.version == DEFAULT_VERSION else [report.version]
+    if report.reasoning != DEFAULT_REASONING:
+        details.append(f"reasoning {report.reasoning}")
+    return f"{report.model} ({', '.join(details)})" if details else report.model
 
 
 def _run_notes(report: EvalReport) -> tuple[str, ...]:
@@ -227,6 +244,34 @@ def format_markdown_table(rows: Sequence[Row]) -> str:
     return "\n".join(lines)
 
 
+def format_version_table(reports: Sequence[EvalReport]) -> str:
+    """Render the workflow-vs-agent table of ``docs/results.md``.
+
+    Args:
+        reports: Reports returned by ``load_runs``, one row each. Repeated runs of a
+            version are numbered in the order given.
+
+    Returns:
+        A Markdown table with model calls and tool calls per posting.
+    """
+    lines = [VERSION_TABLE_HEADER, VERSION_TABLE_DIVIDER]
+    seen: dict[str, int] = {}
+    for report in reports:
+        seen[report.version] = seen.get(report.version, 0) + 1
+        name = f"{report.version.capitalize()}, run {seen[report.version]}"
+        cost = (
+            UNKNOWN_COST if report.cost_per_100_usd is None else f"${report.cost_per_100_usd:.2f}"
+        )
+        # Run files from before the field existed are workflow runs without retries.
+        model_calls = 1.0 if report.mean_model_calls is None else report.mean_model_calls
+        lines.append(
+            f"| {name} | {report.final.accuracy:.1%} | {report.final.weighted_error_mean:.2f} | "
+            f"{cost} | {report.mean_latency_s:.1f} s | {model_calls:.2f} | "
+            f"{report.mean_tool_calls:.2f} |"
+        )
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Print the comparison table for the given run files.
 
@@ -238,13 +283,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="Compare saved eval runs in one table.")
     parser.add_argument("runs", type=Path, nargs="+", help="Run files from data/results/.")
+    parser.add_argument(
+        "--table",
+        choices=TABLES,
+        default=MODELS_TABLE,
+        help="models: one row per model run, with the Pareto front. "
+        "versions: workflow vs. agent, with model and tool calls.",
+    )
     args = parser.parse_args(argv)
     try:
-        rows = rows_from_reports(load_runs(args.runs))
+        reports = load_runs(args.runs)
+        rows = rows_from_reports(reports)
     except (OSError, CompareError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
-    print(format_markdown_table(rows))
+    if args.table == VERSIONS_TABLE:
+        print(format_version_table(reports))
+    else:
+        print(format_markdown_table(rows))
     return 0
 
 

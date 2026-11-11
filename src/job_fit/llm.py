@@ -1,7 +1,8 @@
 """Single entry point for LLM calls.
 
-This is the only module that imports a provider SDK or reads ``.env``. The rest of the
-code calls ``generate_json`` and does not care which provider answers.
+This is the only module that imports a provider SDK or reads ``.env``. The workflow
+calls ``generate_json``; the agent gets its LangChain chat model from ``chat_model``.
+Neither cares which provider answers.
 """
 
 import os
@@ -10,11 +11,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
 
+import httpx
 import openai
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
+from langchain_core.language_models import BaseChatModel
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from pydantic import BaseModel
 
 Provider = Literal["vertex", "openrouter", "ollama"]
@@ -40,6 +45,15 @@ OPENROUTER_PINNED_PROVIDERS: dict[str, str] = {
     "nvidia/nemotron-3.5-super-vl:free": "nvidia",
     "liquid/lfm-3-1.7b:free": "liquid",
 }
+
+
+# What a LangChain chat model on Vertex can raise when a call fails. The agent catches
+# these and reports an LLMError, so it does not need to import a provider SDK.
+CHAT_MODEL_ERRORS: tuple[type[Exception], ...] = (
+    genai_errors.APIError,
+    ChatGoogleGenerativeAIError,
+    httpx.HTTPError,
+)
 
 
 class LLMError(RuntimeError):
@@ -73,6 +87,22 @@ def vertex_location() -> str:
     return os.environ.get("GOOGLE_CLOUD_LOCATION") or DEFAULT_VERTEX_LOCATION
 
 
+def _vertex_project() -> str:
+    """Return the Google Cloud project that Vertex AI calls are billed to.
+
+    Returns:
+        The value of ``GOOGLE_CLOUD_PROJECT``.
+
+    Raises:
+        LLMError: If ``GOOGLE_CLOUD_PROJECT`` is not set.
+    """
+    load_dotenv()
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not project:
+        raise LLMError("GOOGLE_CLOUD_PROJECT is not set. Copy .env.example to .env and fill it in.")
+    return project
+
+
 @lru_cache(maxsize=1)
 def _vertex_client() -> genai.Client:
     """Create the Vertex AI client from environment variables.
@@ -83,11 +113,50 @@ def _vertex_client() -> genai.Client:
     Raises:
         LLMError: If ``GOOGLE_CLOUD_PROJECT`` is not set.
     """
-    load_dotenv()
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-    if not project:
-        raise LLMError("GOOGLE_CLOUD_PROJECT is not set. Copy .env.example to .env and fill it in.")
-    return genai.Client(vertexai=True, project=project, location=vertex_location())
+    return genai.Client(vertexai=True, project=_vertex_project(), location=vertex_location())
+
+
+def chat_model(
+    provider: str,
+    model: str,
+    *,
+    reasoning: bool | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> BaseChatModel:
+    """Create the LangChain chat model the agent runs on.
+
+    It is configured like the workflow's calls (same project, location, temperature,
+    thinking switch and retry count), so that the two versions differ only in the
+    harness around the model.
+
+    Args:
+        provider: Only "vertex" is supported for the agent.
+        model: Model id, e.g. a Gemini Flash model.
+        reasoning: True to let the model think, False to disable thinking, None to
+            keep the model's default.
+        timeout_s: Timeout for one HTTP request, in seconds.
+
+    Returns:
+        A chat model that supports tool calling.
+
+    Raises:
+        LLMError: If the provider is not Vertex or ``GOOGLE_CLOUD_PROJECT`` is not set.
+    """
+    if provider != "vertex":
+        raise LLMError(f"The agent supports only the vertex provider, not '{provider}'.")
+    thinking: dict[str, Any] = {}
+    if reasoning is not None:
+        thinking["thinking_budget"] = THINKING_AUTOMATIC if reasoning else THINKING_DISABLED
+    return ChatGoogleGenerativeAI(
+        model=model,
+        vertexai=True,
+        project=_vertex_project(),
+        location=vertex_location(),
+        temperature=TEMPERATURE,
+        timeout=timeout_s,
+        max_retries=MAX_HTTP_ATTEMPTS - 1,
+        **thinking,
+    )
 
 
 def _thinking_config(reasoning: bool | None) -> types.ThinkingConfig | None:

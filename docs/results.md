@@ -112,11 +112,110 @@ with 8 GB of VRAM or more, a 7–8B model at 4-bit would be the first thing to t
 
 ## Workflow vs. agent (Phase 4)
 
-| Version | Accuracy | Weighted error | Cost | Latency | Avg. tool calls |
-|---|---|---|---|---|---|
-| Workflow | | | | | 0 |
-| Agent | | | | | |
+Same model and settings for both versions: `gemini-2.5-flash` on Vertex AI `global`,
+reasoning on, temperature 0, the same 21 postings (dataset SHA-256 `296805a932ba…`), the
+hard rules applied in code to the final answer. Only the harness differs:
+
+- **Workflow:** one model call that sees the posting and the whole CV.
+- **Agent:** LangChain `create_agent` with three tools (`check_rules`, `get_cv_section`,
+  `convert_currency`) and at most 6 model calls per posting. It sees the posting and
+  must read the CV through `get_cv_section`.
+
+Each version was run twice, because Phase 3 showed that one run can be off by a posting.
+Workflow run 1 is the Phase 3 run of 2026-11-10; the other three are from 2026-11-11.
+The table is generated with `uv run python -m job_fit.compare --table versions <run files>`.
+
+| Version | Accuracy | Weighted error (mean) | Cost per 100 postings | Avg. latency | Avg. model calls | Avg. tool calls |
+|---|---|---|---|---|---|---|
+| Workflow, run 1 | 71.4% | 0.43 | $0.64 | 11.9 s | 1.00 | 0.00 |
+| Workflow, run 2 | 66.7% | 0.48 | $0.64 | 12.1 s | 1.00 | 0.00 |
+| Agent, run 1 | 85.7% | 0.14 | $0.74 | 14.8 s | 3.67 | 3.71 |
+| Agent, run 2 | 61.9% | 0.38 | $0.77 | 15.0 s | 3.71 | 3.71 |
+| **Workflow, mean of 2** | 69.0% | 0.45 | $0.64 | 12.0 s | 1.00 | 0.00 |
+| **Agent, mean of 2** | 73.8% | 0.26 | $0.75 | 14.9 s | 3.69 | 3.71 |
+
+The two "mean" rows are computed by hand from the rows above. No call failed, no posting
+hit the step limit and no answer needed a schema retry in any of the four runs.
+
+### What the numbers say
+
+- **Accuracy does not separate the versions.** The agent has both the best run (18 of
+  21) and the worst (13 of 21); the workflow's runs (15 and 14) lie in between.
+- **The agent is much less stable.** Its two runs disagree on 8 of 21 postings; the
+  workflow's two runs disagree on 2. Same model, same temperature 0: a decision reached
+  over several model calls has more places to drift.
+- **The agent made no expensive mistake.** In neither run did it rate a good or
+  preparable job as SKIP; the workflow did that twice in each run (5 of its 9 and 10
+  error points). That is why the agent's weighted error is lower in both runs (0.14 and
+  0.38 against 0.43 and 0.48). In run 2 the agent got there by hedging: it rated 5 SKIP
+  postings as PREPARE, which is wrong but cheap in the cost matrix, the same pattern as
+  the models without thinking in Phase 3.
+- **Cost and latency rose less than the number of calls suggests:** about 18% more cost
+  and 24% more time for 3.7 times the model calls. The agent sends 3.3 times the input
+  tokens (the conversation is re-sent on every call) but writes slightly fewer output
+  tokens (about 44k against 48k per run), and output tokens are what this model
+  charges for.
+
+### How the agent used its tools
+
+Tool usage was identical in both runs, call for call:
+
+| Tool | Calls per run | Postings | What it was used for |
+|---|---|---|---|
+| `check_rules` | 21 | 21 of 21 | Called first, before reading the CV, in 41 of 42 cases. |
+| `get_cv_section` | 49 | 21 of 21 | `experience` 21, `skills` 21, `summary` 7. Never `projects`, `education` or `languages`. |
+| `convert_currency` | 8 | 4 of 21 | Both ends of the USD salary range in the four Sezzle postings. |
+
+- The agent did not explore. It ran the same three steps on every posting: check the
+  rules, read experience and skills, answer. That is a fixed workflow which the model
+  re-derives on every posting, at 3 to 6 model calls each (3 calls for 19 of the 42
+  decisions, 4 for 18, 5 for 4, 6 for 1).
+- It never read the Projects section, so it decided on less of the CV than the workflow,
+  which always sees all of it.
+- `check_rules` changed nothing. Its answer matched the rules applied in code for all 42
+  decisions, and the code would have applied them anyway. The rules changed one outcome
+  in agent run 1 and none in run 2.
+- `convert_currency` was called for every posting with a USD salary, but its result has
+  nowhere to go: `JobDecision` has no salary field and salary is not part of the
+  decision. It uses a fixed rate (1 USD = 50.0 TRY, 1 EUR = 56.1 TRY, approximate
+  mid-market rates from xe.com on 2026-11-04), not a live one.
+
+### How much to trust the differences
+
+- Two runs per version on 21 postings. The agent's own runs differ by 5 correct
+  postings, more than the gap between the versions' means (73.8% vs. 69.0%, one
+  posting). The accuracy difference is noise.
+- The weighted-error difference points the same way in both runs, but the two versions
+  also differ in prompt (the agent's instructions mention tools and it reads part of the
+  CV), so the lower error cannot be credited to tool calling as such.
+- The earlier caveats still hold: 3 PREPARE postings, labels accepted from a suggested
+  list, latency from one home connection.
 
 ### Is an agent needed for this problem?
 
-_To be written._
+_Drafted by Claude from the numbers above; not yet confirmed by the candidate._
+
+No. An agent earns its cost when the steps cannot be known in advance: when what to look
+up next depends on what the last lookup returned. This task is not like that. Every
+posting needs the same inputs (the posting, the CV, the rules), and the agent showed it:
+in 42 decisions it made the same tool calls in the same order, so the "decisions" it was
+given the freedom to make were never really open. A fixed sequence written in code does
+the same work in one model call.
+
+What the agent added was cost and instability, not accuracy. It needed 3.7 model calls
+per posting, cost 18% more and took 24% longer, and its two runs disagreed on 8 of 21
+postings against 2 for the workflow. For a tool whose answer I act on, a decision that
+changes when I ask again is worse than one that is consistently a little too strict. Of
+its three tools, `check_rules` duplicated what the code enforces anyway,
+`convert_currency` produced numbers the decision never uses, and `get_cv_section` only
+made the agent see less of a CV that fits in the prompt (under 800 words).
+
+The one result in the agent's favor is that it never skipped a good job, which gave it
+the lower weighted error in both runs. That is worth following up, but in the workflow:
+the likely cause is the different prompt and the more lenient reading it produced, not
+tool calling, and a prompt change is cheaper to test and to keep than an agent loop.
+
+An agent would become the right choice if the task grew steps that depend on each
+other: looking up the company, fetching a posting from a URL, comparing against earlier
+applications, or asking me a question when the posting is unclear. Until then the fixed
+workflow stays the version I use.

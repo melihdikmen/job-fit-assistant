@@ -368,3 +368,60 @@ def test_unknown_provider_raises_value_error() -> None:
     """A provider name outside the supported set is rejected."""
     with pytest.raises(ValueError, match="Unknown provider"):
         generate_json("bedrock", MODEL, "system", "user", JobDecision)
+
+
+@pytest.fixture
+def recorded_chat_model(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace the LangChain Gemini class and the environment; return what it is built with."""
+    recorded: dict[str, Any] = {}
+    monkeypatch.setattr(llm, "ChatGoogleGenerativeAI", lambda **kwargs: recorded.update(kwargs))
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "test-location")
+    return recorded
+
+
+def test_chat_model_is_configured_like_the_workflow_calls(
+    recorded_chat_model: dict[str, Any],
+) -> None:
+    """The agent's model uses the same project, location, temperature and retries."""
+    llm.chat_model("vertex", MODEL, timeout_s=30.0)
+
+    assert recorded_chat_model == {
+        "model": MODEL,
+        "vertexai": True,
+        "project": "test-project",
+        "location": "test-location",
+        "temperature": llm.TEMPERATURE,
+        "timeout": 30.0,
+        "max_retries": llm.MAX_HTTP_ATTEMPTS - 1,
+    }
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "expected_budget"),
+    [(True, llm.THINKING_AUTOMATIC), (False, llm.THINKING_DISABLED)],
+)
+def test_chat_model_reasoning_switch_sets_the_thinking_budget(
+    recorded_chat_model: dict[str, Any], reasoning: bool, expected_budget: int
+) -> None:
+    """Reasoning on and off map to the same thinking budgets as in the workflow."""
+    llm.chat_model("vertex", MODEL, reasoning=reasoning)
+
+    assert recorded_chat_model["thinking_budget"] == expected_budget
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "ollama", "bedrock"])
+def test_chat_model_supports_only_vertex(provider: str) -> None:
+    """The agent cannot run on a provider other than Vertex."""
+    with pytest.raises(LLMError, match="supports only the vertex provider"):
+        llm.chat_model(provider, MODEL)
+
+
+def test_chat_model_without_a_project_raises_llm_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing project id is reported before any model is created."""
+    monkeypatch.setattr(llm, "load_dotenv", lambda: None)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+
+    with pytest.raises(LLMError, match="GOOGLE_CLOUD_PROJECT"):
+        llm.chat_model("vertex", MODEL)

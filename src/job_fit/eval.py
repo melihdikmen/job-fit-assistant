@@ -1,8 +1,8 @@
-"""Evaluate the workflow against the labeled test set.
+"""Evaluate the workflow or the agent against the labeled test set.
 
 Run it with::
 
-    uv run python -m job_fit.eval --model <model-id>
+    uv run python -m job_fit.eval --model <model-id> [--version agent]
 
 It prints accuracy, the confusion matrix, the weighted error, the baselines, tokens,
 estimated cost and latency, lists every wrong decision, and saves the run to
@@ -17,9 +17,11 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
+from job_fit.agent import agent_prompt_fingerprint, decide_with_agent
 from job_fit.dataset import (
     DEFAULT_DATA_PATH,
     DatasetError,
@@ -32,24 +34,32 @@ from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, vertex_location
 from job_fit.metrics import LABELS, Scores, constant_baseline, majority_label, score
 from job_fit.pricing import PRICES_CHECKED_ON, ModelPrice, call_cost_usd, price_for
 from job_fit.schema import DecisionLabel
+from job_fit.tools import rule_check
 from job_fit.workflow import (
     DEFAULT_CV_PATH,
     DEFAULT_PROVIDER,
     DEFAULT_REASONING,
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
+    DecideFn,
     DecisionError,
-    DecisionResult,
     ReasoningSetting,
+    ToolCallRecord,
     add_llm_arguments,
     decide,
     reasoning_flag,
 )
 
-DecideFn = Callable[..., DecisionResult]
+Version = Literal["workflow", "agent"]
 ProgressFn = Callable[[int, int, "PostingResult"], None]
 Clock = Callable[[], datetime]
 SleepFn = Callable[[float], None]
+
+VERSIONS: tuple[Version, ...] = get_args(Version)
+DEFAULT_VERSION: Version = "workflow"
+AGENT_VERSION: Version = "agent"
+DECIDE_FUNCTIONS: dict[Version, DecideFn] = {"workflow": decide, "agent": decide_with_agent}
+CHECK_RULES_TOOL_NAME = "check_rules"
 
 DEFAULT_RESULTS_DIR = Path("data/results")
 # A run of failed calls means the setup is broken (wrong project, expired login), not
@@ -80,6 +90,7 @@ class PostingResult(BaseModel):
         output_tokens: Generated tokens used; 0 if the call failed.
         latency_s: Seconds spent in LLM calls; 0 if the call failed.
         attempts: Number of LLM calls made; 0 if the call failed.
+        tool_calls: Tool calls the agent made, in order; empty for the workflow.
         rationale: The model's rationale, with rule notes appended.
         error: Why the call failed; empty on success.
     """
@@ -96,6 +107,7 @@ class PostingResult(BaseModel):
     output_tokens: int = 0
     latency_s: float = 0.0
     attempts: int = 0
+    tool_calls: tuple[ToolCallRecord, ...] = ()
     rationale: str = ""
     error: str = ""
 
@@ -120,6 +132,7 @@ class EvalReport(BaseModel):
     Attributes:
         model: Model id.
         provider: LLM provider.
+        version: What made the decisions: the fixed "workflow" or the "agent".
         reasoning: Reasoning setting of the run: "on", "off" or the model's "default".
         location: Vertex AI location the calls went to; None for other providers.
         started_at: Local time the run started, ISO 8601.
@@ -142,12 +155,20 @@ class EvalReport(BaseModel):
         cost_usd: Estimated cost of the run; None if the price is unknown.
         cost_per_100_usd: Estimated cost per 100 postings; None if the price is unknown.
         mean_latency_s: Mean seconds per answered posting.
+        mean_model_calls: Mean model calls per answered posting; None in run files
+            written before the field existed.
+        mean_tool_calls: Mean tool calls per answered posting; 0 for the workflow.
+        tool_call_counts: Total calls per tool name over the run.
+        check_rules_called: Postings for which the agent called ``check_rules``.
+        check_rules_agreed: Of those, postings where the tool's answer for the agent's
+            last call equals the rules that fired in code on the final output.
         results: One record per posting, in test set order.
     """
 
     model: str
     provider: str
     # Defaults keep run files written before these fields existed loadable.
+    version: Version = DEFAULT_VERSION
     reasoning: ReasoningSetting = DEFAULT_REASONING
     location: str | None = None
     started_at: str
@@ -169,6 +190,11 @@ class EvalReport(BaseModel):
     cost_usd: float | None
     cost_per_100_usd: float | None
     mean_latency_s: float
+    mean_model_calls: float | None = None
+    mean_tool_calls: float = 0.0
+    tool_call_counts: dict[str, int] = {}
+    check_rules_called: int = 0
+    check_rules_agreed: int = 0
     results: list[PostingResult]
 
 
@@ -220,6 +246,7 @@ def _evaluate_one(
         output_tokens=result.output_tokens,
         latency_s=result.latency_s,
         attempts=result.attempts,
+        tool_calls=result.tool_calls,
         rationale=result.decision.rationale,
     )
 
@@ -319,6 +346,47 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def workflow_prompt_sha256() -> str:
+    """Hash the workflow's prompt templates.
+
+    Returns:
+        The SHA-256 digest in hexadecimal.
+    """
+    return sha256_text(SYSTEM_PROMPT + USER_PROMPT_TEMPLATE)
+
+
+def _check_rules_agreement(results: Sequence[PostingResult]) -> tuple[int, int]:
+    """Compare what ``check_rules`` told the agent with the rules applied in code.
+
+    The tool's answer is not stored, so it is recomputed from the arguments of the
+    agent's last ``check_rules`` call. A mismatch means the facts the agent passed to
+    the tool differ from the facts in its final answer.
+
+    Args:
+        results: One result per posting.
+
+    Returns:
+        The number of postings with a ``check_rules`` call, and how many of those
+        match the rules that fired on the final output.
+    """
+    called = 0
+    agreed = 0
+    for result in results:
+        calls = [call for call in result.tool_calls if call.name == CHECK_RULES_TOOL_NAME]
+        if not calls:
+            continue
+        called += 1
+        arguments = calls[-1].arguments
+        told = rule_check(
+            str(arguments.get("location", "")),
+            str(arguments.get("work_mode", "")),
+            bool(arguments.get("english_required", False)),
+            str(arguments.get("seniority", "")),
+        )
+        agreed += tuple(told["violated_rules"]) == result.fired_rules
+    return called, agreed
+
+
 def build_report(
     results: Sequence[PostingResult],
     *,
@@ -330,6 +398,8 @@ def build_report(
     coverage_problems: Sequence[str],
     reasoning: ReasoningSetting = DEFAULT_REASONING,
     location: str | None = None,
+    version: Version = DEFAULT_VERSION,
+    prompt_sha256: str | None = None,
 ) -> EvalReport:
     """Compute all metrics for a finished run.
 
@@ -343,6 +413,8 @@ def build_report(
         coverage_problems: Shortfalls of the full test set.
         reasoning: Reasoning setting of the run.
         location: Vertex AI location the calls went to; None for other providers.
+        version: What made the decisions: "workflow" or "agent".
+        prompt_sha256: Hash of the prompts the run used; None for the workflow's.
 
     Returns:
         The report to print and save.
@@ -372,15 +444,23 @@ def build_report(
     )
     counts = {label: actual.count(label) for label in LABELS}
 
+    tool_call_counts: dict[str, int] = {}
+    for result in results:
+        for call in result.tool_calls:
+            tool_call_counts[call.name] = tool_call_counts.get(call.name, 0) + 1
+    answered_count = len(answered) or 1
+    check_rules_called, check_rules_agreed = _check_rules_agreement(results)
+
     return EvalReport(
         model=model,
         provider=provider,
+        version=version,
         reasoning=reasoning,
         location=location,
         started_at=started_at.isoformat(timespec="seconds"),
         dataset_path=dataset_path.as_posix(),
         dataset_sha256=dataset_sha256,
-        prompt_sha256=sha256_text(SYSTEM_PROMPT + USER_PROMPT_TEMPLATE),
+        prompt_sha256=prompt_sha256 or workflow_prompt_sha256(),
         dataset_size=len(results),
         label_counts=counts,
         coverage_problems=list(coverage_problems),
@@ -398,6 +478,11 @@ def build_report(
         cost_usd=cost_usd,
         cost_per_100_usd=None if cost_usd is None else cost_usd / len(results) * COST_REPORT_UNIT,
         mean_latency_s=mean_latency_s,
+        mean_model_calls=sum(result.attempts for result in answered) / answered_count,
+        mean_tool_calls=sum(tool_call_counts.values()) / answered_count,
+        tool_call_counts=tool_call_counts,
+        check_rules_called=check_rules_called,
+        check_rules_agreed=check_rules_agreed,
         results=list(results),
     )
 
@@ -479,14 +564,32 @@ def _describe_route(report: EvalReport) -> str:
         report: Report of the run.
 
     Returns:
-        Provider, location if any, and the reasoning setting, e.g.
-        "vertex, global, reasoning off".
+        Version, provider, location if any, and the reasoning setting, e.g.
+        "workflow, vertex, global, reasoning off".
     """
-    parts = [report.provider]
+    parts = [report.version, report.provider]
     if report.location:
         parts.append(report.location)
     parts.append(f"reasoning {report.reasoning}")
     return ", ".join(parts)
+
+
+def _format_agent_usage(report: EvalReport) -> list[str]:
+    """Render how many steps and tool calls an agent run needed.
+
+    Args:
+        report: Report of an agent run.
+
+    Returns:
+        Lines for model calls, tool calls per tool, and the ``check_rules`` agreement.
+    """
+    per_tool = ", ".join(f"{name} {count}" for name, count in report.tool_call_counts.items())
+    return [
+        f"steps:    {report.mean_model_calls or 0.0:.2f} model calls mean per posting",
+        f"tools:    {report.mean_tool_calls:.2f} calls mean per posting ({per_tool or 'none'})",
+        f"rules:    check_rules called for {report.check_rules_called} postings; "
+        f"its answer matched the rules applied in code for {report.check_rules_agreed}",
+    ]
 
 
 def format_report(report: EvalReport) -> str:
@@ -536,6 +639,8 @@ def format_report(report: EvalReport) -> str:
             f"(list price, checked {report.prices_checked_on})"
         )
     lines.append(f"latency:  {report.mean_latency_s:.2f} s mean per posting")
+    if report.version == AGENT_VERSION:
+        lines += _format_agent_usage(report)
 
     wrong = [result for result in report.results if result.predicted != result.label]
     lines += ["", f"Wrong decisions: {len(wrong)} of {report.dataset_size}"]
@@ -545,11 +650,11 @@ def format_report(report: EvalReport) -> str:
 
 
 def save_report(report: EvalReport, results_dir: Path, started_at: datetime) -> Path:
-    """Write a report to ``<date>_<time>_<model>[_reasoning-<setting>].json``.
+    """Write a report to ``<date>_<time>_<model>[_agent][_reasoning-<setting>].json``.
 
     The time is part of the name so that a second run on the same day does not
-    overwrite the first. A reasoning setting other than the default is part of the
-    name so that runs with reasoning on and off are easy to tell apart.
+    overwrite the first. The agent version and a reasoning setting other than the
+    default are part of the name so that such runs are easy to tell apart.
 
     Args:
         report: Report to save.
@@ -560,7 +665,9 @@ def save_report(report: EvalReport, results_dir: Path, started_at: datetime) -> 
         The path of the file written.
     """
     safe_model = re.sub(r"[^A-Za-z0-9._-]+", "-", report.model)
-    suffix = "" if report.reasoning == DEFAULT_REASONING else f"_reasoning-{report.reasoning}"
+    suffix = "" if report.version == DEFAULT_VERSION else f"_{report.version}"
+    if report.reasoning != DEFAULT_REASONING:
+        suffix += f"_reasoning-{report.reasoning}"
     path = results_dir / f"{started_at:%Y-%m-%d_%H%M%S}_{safe_model}{suffix}.json"
     results_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
@@ -594,6 +701,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate a model on the labeled test set.")
     parser.add_argument("--model", required=True, help="Model id, as the provider names it.")
     parser.add_argument("--provider", default=DEFAULT_PROVIDER, help="LLM provider.")
+    parser.add_argument(
+        "--version",
+        choices=VERSIONS,
+        default=DEFAULT_VERSION,
+        help="What decides: the fixed workflow or the tool-calling agent.",
+    )
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH, help="Test set (JSONL).")
     parser.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help="Path to the CV.")
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
@@ -650,7 +763,10 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
 
     started_at = clock()
     counts = ", ".join(f"{label} {count}" for label, count in label_counts(selected).items())
-    print(f"evaluating {len(selected)} postings ({counts}) with {args.model}", flush=True)
+    print(
+        f"evaluating {len(selected)} postings ({counts}) with {args.model} ({args.version})",
+        flush=True,
+    )
     results = evaluate(
         selected,
         cv,
@@ -672,6 +788,10 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
         coverage_problems=coverage_problems,
         reasoning=args.reasoning,
         location=vertex_location() if args.provider == VERTEX_PROVIDER else None,
+        version=args.version,
+        prompt_sha256=(
+            sha256_text(agent_prompt_fingerprint(cv)) if args.version == AGENT_VERSION else None
+        ),
     )
     print()
     print(format_report(report))
@@ -683,14 +803,15 @@ def run(args: argparse.Namespace, decide_fn: DecideFn, clock: Clock) -> Path:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    decide_fn: DecideFn = decide,
+    decide_fn: DecideFn | None = None,
     clock: Clock = datetime.now,
 ) -> int:
     """Evaluate a model on the test set and print all metrics.
 
     Args:
         argv: Arguments without the program name; None reads ``sys.argv``.
-        decide_fn: Function with the signature of ``workflow.decide``; tests pass a fake.
+        decide_fn: Function with the signature of ``workflow.decide``. None picks the
+            workflow or the agent according to ``--version``; tests pass a fake.
         clock: Returns the current time; tests pass a fixed one.
 
     Returns:
@@ -702,7 +823,7 @@ def main(
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
-        run(args, decide_fn, clock)
+        run(args, decide_fn or DECIDE_FUNCTIONS[args.version], clock)
     except (OSError, ValueError, EvalError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

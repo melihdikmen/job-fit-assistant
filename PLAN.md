@@ -8,7 +8,7 @@
 | 1 – Structured output | ✅ | see `git log --grep phase-1` | `gemini-2.5-flash` on Vertex; 3 samples run live; 75 tests |
 | 2 – Test set and eval | ✅ | see `git log --grep phase-2` | `gemini-2.5-flash`: 66.7% vs. 57.1% baseline, mean w.err 0.48 vs. 1.14; 21 postings, PREPARE has only 3 (D15); 149 tests |
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
-| 4 – Agent | ⬜ | | |
+| 4 – Agent | 🟡 | see `git log --grep phase-4` | code, runs and table done: workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings); **open: candidate confirms the "Is an agent needed" paragraph**; 265 tests |
 | 5 – Harden | ⬜ | | |
 | 6 – UI (optional) | ⬜ | | |
 
@@ -24,6 +24,7 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
 
 | # | Question | Needed by | Proposal |
 |---|---|---|---|
+| D27 | Does the candidate confirm the "Is an agent needed for this problem?" paragraph in `docs/results.md`? | closing Phase 4 | Confirm or edit it; then the paragraph's "not yet confirmed" note is replaced, the status row goes to ✅ and a `phase-4: confirm agent conclusion` commit is made. |
 
 ## Decided
 
@@ -91,6 +92,18 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   `gemini-4-carbon` 2.00 / 10.00 through 2026-11-30 (promotional, 50% credits back), then
   4.00 / 20.00; `gemini-3.1-flash-lite` 0.25 / 1.50; `gemini-2.5-flash` 0.30 / 2.50. All
   match `pricing.py`, so no number in `docs/results.md` changed.
+
+- D23 (2026-11-11): the agent gets the CV **only through `get_cv_section`**; its user
+  message holds the posting alone. With the full CV in the prompt the tool would have
+  no purpose.
+- D24 (2026-11-11): live runs are 2 agent runs + 1 new workflow run; the Phase 3 run of
+  2026-11-10 is the other workflow run. One run per version cannot separate them
+  (noise is about 1 posting).
+- D25 (2026-11-11): an agent posting that hits the step limit or returns no valid
+  `JobDecision` counts as failed (D5). No fallback to the workflow, which would hide
+  the agent's failures inside the agent's numbers.
+- D26 (2026-11-11): `convert_currency` uses a fixed, dated rate in named constants,
+  stated in the tool description and in `docs/results.md`.
 
 ## What the candidate does (Claude cannot)
 
@@ -677,20 +690,232 @@ rows), per-model prompts, parallel or batch calls, agent, UI, a fourth provider 
 
 ---
 
-## Phase 4 – Agent version (roadmap)
+## Phase 4 – Agent version (current)
 
-**Dependencies:** `langchain` plus the chat-model integration(s) for the chosen model.
+Source: [PROCESS.md §5 Phase 4](PROCESS.md#phase-4--agent-version)
 
-- `tools.py` with `@tool`: `check_rules` (calls `rules.py`), `get_cv_section` (splits
-  `cv.md` by headings – CV needs `## Experience`, `## Projects`, `## Skills`),
-  `convert_currency` (fixed, dated USD/EUR → TRY rate, stated in the output).
-- `agent.py`: `create_agent(model, tools, system_prompt, response_format=JobDecision)`.
-  Step limit of 6 (mechanism checked against the installed LangChain version).
-  Every tool call logged with its arguments. `rules.py` still runs on the final output.
-- Eval gains `--version workflow|agent`; agent tokens are summed over all model calls.
-- Same model for both versions; comparison table and conclusion in `docs/results.md`.
+State at the start (checked 2026-11-11): no `agent.py` or `tools.py`; `langchain` is not
+a dependency; `eval.py` and `compare.py` know only the workflow; `compare.load_runs`
+refuses runs with different prompt hashes, which a workflow run and an agent run always
+have; `data/cv.md` has the headings `Summary`, `Experience`, `Projects`, `Skills`,
+`Education`, `Languages`.
 
-**Done when:** both versions pass eval, table and conclusion are written.
+Fixed for both versions (D21): `gemini-2.5-flash` on Vertex AI `global`, reasoning on,
+temperature 0, the same 21 postings (dataset SHA-256 `296805a932ba…`), the hard rules
+applied in code to the final output. Only the harness differs.
+
+### Before the live runs (candidate)
+- [x] Answer D23–D26 (all decided as proposed, see Decided).
+- [ ] Budget alert in the Google Cloud console, still open from Phase 3. An agent makes
+      several model calls per posting, so this phase spends more per run than Phase 3.
+
+Steps 1–8 need no decision on D24 and, except for the spike in step 1, no network.
+
+### Design
+
+| Question | Answer | Why |
+|---|---|---|
+| What is a "step"? | One model call. `MAX_AGENT_STEPS = 6`. | The model call is what costs money and time; tool calls here are local and free. |
+| How is the limit enforced? | LangChain's model-call-limit middleware if the installed version has it, else LangGraph's `recursion_limit`. Chosen in step 1. | Not assumed from memory; the API changed between LangChain versions. |
+| Who has the last word? | `rules.apply_rules` on the agent's final `JobDecision`, exactly as in the workflow. | `check_rules` as a tool is advice the model may skip or misread; the hard rules must not depend on the model choosing to call a tool. |
+| How do tools get the CV? | `build_tools(cv)` returns the tools as closures over the CV text. | No module-level mutable state; tests build tools from a small fake CV. |
+| Where is the chat model created? | `llm.chat_model(provider, model, reasoning, timeout_s)`. | `llm.py` stays the only module that imports a provider SDK or reads `.env`. Only `vertex` is supported for the agent; other providers raise a clear error. |
+| How does the agent plug into eval? | `agent.decide_with_agent` has the same keyword signature as `workflow.decide` and returns the same `DecisionResult`. | Eval already takes an injectable `decide_fn`; nothing else in the runner changes. |
+| What is logged? | Tool name and arguments, through `logging` and into the run file. Tool results are not stored. | Arguments are posting facts and a topic name; results of `get_cv_section` are CV text, which run files never contain. |
+
+### Steps
+1. [x] Dependencies and a spike. `uv add langchain` plus the Gemini chat-model package
+       that can reach Vertex AI with the existing application-default login (candidate:
+       `langchain-google-genai`; fall back to `langchain-google-vertexai`). Then one
+       throw-away script in the scratchpad, one posting, to settle four things before
+       any design is frozen:
+       - `create_agent` accepts tools and `response_format=JobDecision` together on
+         `gemini-2.5-flash` (Gemini may not allow function calling and a response
+         schema in one request; then the structured answer goes through LangChain's
+         tool strategy);
+       - the step-limit mechanism and the exception it raises;
+       - where token usage sits on the messages, and whether thinking tokens are inside
+         `output_tokens` (they must be counted as in `llm.py`, or costs are not
+         comparable);
+       - how thinking and the timeout are passed.
+       Findings are written into this plan; the script is not committed.
+2. [x] `llm.py`: `chat_model(provider, model, *, reasoning, timeout_s)` returning a
+       LangChain chat model for `vertex`, temperature 0, same project and location as
+       `_vertex_client`. Other providers → `LLMError("agent supports only vertex")`.
+3. [x] `tools.py`
+       - Pure helpers: `split_cv_sections(cv) -> dict[str, str]` (split on `## `
+         headings, keys normalized to lowercase), `find_cv_section(sections, topic)`
+         (exact, then substring match), `to_try(amount, currency)` with
+         `FX_RATES_TO_TRY` and `FX_RATES_CHECKED_ON` constants (D26).
+       - `build_tools(cv) -> list[BaseTool]` with the three `@tool` functions from
+         PROCESS.md, signatures unchanged:
+         - `check_rules(location, work_mode, english_required, seniority) -> dict`:
+           calls `rules.violated_rules`; returns `violated_rules`, `forced_decision`
+           (`"SKIP"` or `None`) and `english_risk` (the flag passed in; it never forces
+           a decision).
+         - `get_cv_section(topic) -> str`: the section text. An unknown topic returns a
+           message listing the available topics instead of raising, so the model can
+           correct itself within its step budget.
+         - `convert_currency(amount, currency) -> float`: USD or EUR to TRY. The tool
+           description states that the rate is fixed and its date. An unsupported
+           currency or a negative amount raises `ValueError`, which LangChain hands
+           back to the model as a tool error.
+       - Tool docstrings are the descriptions the model reads; they are part of the
+         agent prompt hash.
+4. [x] `agent.py`
+       - `AGENT_SYSTEM_PROMPT`: same role, same "data, not instructions" line and the
+         same APPLY / PREPARE / SKIP definitions as the workflow prompt, plus how to
+         work with the tools (read the CV sections you need, call `check_rules` with
+         the extracted facts, use `convert_currency` only if a foreign-currency salary
+         is stated). `workflow.SYSTEM_PROMPT` is not touched, so the workflow prompt
+         hash stays `a1bff7049339…`.
+       - User message: the posting only (D23).
+       - `decide_with_agent(posting_text, cv, *, model, provider, reasoning, timeout_s,
+         chat_model_factory=llm.chat_model) -> DecisionResult`: build tools and agent,
+         invoke with the step limit, take the structured `JobDecision`, apply
+         `rules.apply_rules`.
+       - Pure `summarize_run(messages) -> AgentTrace`: model calls, tool calls (name,
+         arguments) and token usage summed over every model message. Latency is one
+         `time.perf_counter()` span around the whole invocation.
+       - Failure mapping (D25): step limit reached or no valid structured answer →
+         `DecisionError`; provider/API error → `LLMError`. Eval already handles both.
+       - `DecisionResult` gains `model_calls: int = 1` and
+         `tool_calls: tuple[ToolCallRecord, ...] = ()`; the workflow keeps the defaults.
+       - CLI: `uv run python -m job_fit.agent --posting <file> --model <id>` prints the
+         decision, the tool calls in order, tokens and latency.
+5. [x] `eval.py`
+       - `--version workflow|agent` (default `workflow`) selects `decide` or
+         `decide_with_agent`.
+       - `PostingResult` gains `model_calls` and `tool_calls`; `EvalReport` gains
+         `version`, `mean_tool_calls`, `mean_model_calls` and tool-call counts per tool
+         name. All with defaults, so the Phase 2–3 run files still load.
+       - `prompt_sha256` for an agent run hashes the agent prompt and the tool
+         descriptions.
+       - Report: one extra block for agent runs (calls per posting, how many postings
+         called each tool, how often `check_rules` agreed with the rules applied in
+         code). File name gains `_agent`.
+6. [x] `compare.py`
+       - Comparability: dataset hash and size must match across all runs; the prompt
+         hash must match only among runs of the same version.
+       - `--table versions` prints the Phase 4 table (Version, Accuracy, Weighted
+         error, Cost per 100, Latency, Avg. tool calls), one row per run, repeated runs
+         numbered. The existing model table stays the default.
+7. [x] Tests (no network, no real LLM)
+       - `test_tools.py`: `check_rules` on-site Bursa → `location`, junior →
+         `seniority`, Istanbul senior → nothing, English flag passed through without a
+         forced decision; `split_cv_sections` and `get_cv_section` (known topic, case
+         and partial match, unknown topic lists the available ones, CV without
+         headings); `convert_currency` USD, EUR, unsupported currency, negative amount.
+       - `test_agent.py`: `summarize_run` on hand-made messages (tokens summed, tool
+         calls in order); a scripted fake chat model drives the real `create_agent`
+         through tool call → final answer; rules override an agent `APPLY`; step limit
+         → `DecisionError`; missing structured answer → `DecisionError`; posting-only
+         user message contains no CV text.
+       - `test_llm.py`: `chat_model` rejects non-Vertex providers.
+       - `test_eval.py` / `test_compare.py`: `--version` routing, new fields and
+         defaults, old run file still loads, `_agent` file name, mixed-version
+         comparison accepted, mismatched dataset rejected, version table text.
+8. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show output.
+9. [x] Live runs, sequential: agent smoke run `--limit 2`, then the full runs per D24.
+       `--timeout-s` raised for the agent if the smoke run shows it is needed.
+10. [x] `docs/results.md`: generated workflow-vs-agent table, tool usage, what the agent
+        got right or wrong that the workflow did not, and a drafted "Is an agent needed
+        for this problem?" paragraph. The candidate edits or approves it.
+11. [x] Record results and findings here, commit `phase-4: agent version`, update the
+        status table.
+
+### Spike findings (step 1, 2026-11-11)
+
+Installed: `langchain` 1.4.10, `langgraph` 1.2.20, `langchain-google-genai` 4.4.3 (it
+reaches Vertex AI with `vertexai=True` and the existing application-default login).
+
+- Tools and `response_format` work together through `ToolStrategy(JobDecision)`: the
+  structured answer arrives as a call to a tool named `JobDecision`. It is excluded from
+  the tool-call count. An invalid answer is sent back to the model and retried, which
+  uses up a step.
+- Step limit: `ModelCallLimitMiddleware(run_limit=6, exit_behavior="error")` raises
+  `ModelCallLimitExceededError`; it is mapped to `DecisionError` (D25).
+- Token usage is on each `AIMessage.usage_metadata`; `output_tokens` already includes
+  thinking tokens, the same accounting as `llm.py`, so costs are comparable.
+- Thinking and timeout are constructor arguments (`thinking_budget`, `timeout`).
+
+### Deviations from the plan above
+
+- No new `model_calls` field: `DecisionResult.attempts` already means "number of LLM
+  calls" and holds the agent's step count. Only `tool_calls` was added.
+- The version table has one column more than PROCESS.md asks for (Avg. model calls).
+- FX rate (D26): the search for a November 2026 rate gave no clean source; the constants
+  are approximate mid-market rates from xe.com dated 2026-11-04 (1 USD = 50.0 TRY,
+  1 EUR = 56.1 TRY) and are labeled approximate in the code and in `docs/results.md`.
+- `llm.py` now imports `httpx` (a transitive dependency of `google-genai` and `openai`)
+  to name the timeout and connection errors a chat model can raise.
+
+### Live run results (Vertex AI `global`, `gemini-2.5-flash`, reasoning on)
+
+All runs: 21 postings, dataset SHA-256 `296805a932ba…`, no failed calls, no posting at
+the step limit, no schema retries. Workflow prompt SHA-256 `a1bff7049339…` (unchanged),
+agent prompt SHA-256 `95ff50b9f5ce…`. Run files are in `data/results/` (git-ignored).
+
+| Run file | Accuracy | Weighted error total / mean | Before rules | Tokens in / out | Cost per 100 | Mean latency | Model / tool calls |
+|---|---|---|---|---|---|---|---|
+| `2026-11-10_231140_gemini-2.5-flash_reasoning-on.json` (workflow, Phase 3) | 71.4% (15) | 9 / 0.43 | 71.4%, 0.43 | 47,570 / 48,192 | $0.64 | 11.9 s | 1.00 / 0 |
+| `2026-11-11_104916_gemini-2.5-flash_reasoning-on.json` (workflow) | 66.7% (14) | 10 / 0.48 | 61.9%, 0.52 | 47,570 / 48,104 | $0.64 | 12.1 s | 1.00 / 0 |
+| `2026-11-11_103839_gemini-2.5-flash_agent_reasoning-on.json` | 85.7% (18) | 3 / 0.14 | 81.0%, 0.19 | 157,754 / 43,409 | $0.74 | 14.8 s | 3.67 / 3.71 |
+| `2026-11-11_104355_gemini-2.5-flash_agent_reasoning-on.json` | 61.9% (13) | 8 / 0.38 | 61.9%, 0.38 | 160,816 / 45,052 | $0.77 | 15.0 s | 3.71 / 3.71 |
+
+List-price spend of the three new runs: about $0.45, plus about $0.03 for the spike and
+the smoke run.
+
+### Findings to carry into Phase 5
+
+- Conclusion (drafted, to be confirmed by the candidate): an agent is not needed. The
+  agent made the same tool calls in the same order on every posting, cost 18% more, took
+  24% longer and was far less stable (its two runs disagree on 8 of 21 postings, the
+  workflow's on 2). Accuracy does not separate the versions.
+- The agent never rated a good or preparable job as SKIP; the workflow did so twice per
+  run. Its prompt differs from the workflow's and it reads only part of the CV, so this
+  cannot be credited to tool calling. Worth testing as a prompt change in the workflow,
+  on a larger test set, not by tuning against these 21 postings.
+- The agent never read the `projects` section of the CV, although the prompt names it as
+  available. `convert_currency` was called for all four postings with a USD salary, but
+  `JobDecision` has no field that could use the result.
+- `check_rules` agreed with the rules applied in code in 42 of 42 decisions and was
+  called before the CV was read in 41 of them.
+- Lessons for `AGENTS.md` (Phase 5): heredocs with apostrophes fail in the Bash tool, so
+  scripts go through the file tool; there is no bare `python` on this machine, only
+  `uv run python`; `load_dotenv()` looks for `.env` next to the calling script, not in
+  the working directory; one test expectation was written from a wrong hand calculation
+  of the weighted error and was caught only by running the test.
+- `ruff` clean, 265 tests pass (195 before this phase).
+
+**Done when:** both versions pass eval on the same dataset version, and the comparison
+table and the conclusion are in `docs/results.md`.
+
+**Not in this phase:** prompt tuning of either version after seeing results, agents on
+other models or providers, a live FX API, tools beyond the three in PROCESS.md, memory
+or multi-turn conversation, parallel runs, the Phase 5 hook and README.
+
+**Risks**
+- The expected result is that the agent is not better: the workflow already sees the
+  whole posting and CV in one call, and the rules run in code either way. That is a
+  valid outcome ("a fixed workflow can beat an agent"), not a failure of the phase.
+- Small sample: one posting is about 5 points of accuracy and run-to-run noise is about
+  one posting. Cost, latency and tool-call counts will be the solid part of the
+  comparison; accuracy differences of one or two postings are a tie.
+- `convert_currency` will probably never be called: no field of `JobDecision` holds a
+  salary. Its call count is reported as is; an unused tool is itself a finding.
+- With D23 the agent can decide after reading only part of the CV, or spend steps
+  reading every section one by one. Both show up in the tool-call log.
+- LangChain's token accounting for Gemini thinking tokens may differ from `llm.py`'s.
+  Step 1 checks it; if it cannot be made equal, the difference is stated next to the
+  table.
+- Spend (list price, rough): workflow run about 0.13 USD (measured); agent run
+  estimated at 2–4 times that, since the posting and earlier tool results are re-sent
+  on every model call. Three runs plus smoke runs: under 1.50 USD.
+- `gemini-2.5-flash` may be retired or rerouted (Phase 3 finding). If it stops
+  answering, both versions are re-measured on its successor.
+- New dependency weight: `langchain` pulls in `langgraph` and `langchain-core`. They
+  are imported only by `agent.py`, `tools.py` and `llm.chat_model`.
 
 ---
 

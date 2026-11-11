@@ -9,12 +9,14 @@ from job_fit.compare import (
     CompareError,
     Row,
     format_markdown_table,
+    format_version_table,
     load_runs,
     main,
     pareto_front,
     rows_from_reports,
 )
 from job_fit.eval import EvalReport, PostingResult, build_report, save_report
+from job_fit.workflow import ToolCallRecord
 
 STARTED_AT = datetime(2026, 11, 10, 15, 30, 5)
 LABELS = ["APPLY", "SKIP", "SKIP", "PREPARE"]
@@ -234,3 +236,101 @@ def test_main_reports_a_missing_run_file(
 
     assert exit_code == 1
     assert "error:" in capsys.readouterr().err
+
+
+def _agent_report(predictions: list[str | None], prompt_sha256: str = "agent-prompt") -> EvalReport:
+    """Build an agent report in which every posting took 3 model calls and 2 tool calls."""
+    base = _report("gemini-2.5-flash", predictions, reasoning="on")
+    calls = (
+        ToolCallRecord(name="get_cv_section", arguments={"topic": "skills"}),
+        ToolCallRecord(name="check_rules", arguments={}),
+    )
+    results = [
+        result.model_copy(update={"attempts": 3, "tool_calls": calls}) for result in base.results
+    ]
+    return build_report(
+        results,
+        model=base.model,
+        provider=base.provider,
+        started_at=STARTED_AT,
+        dataset_path=Path("data/postings.jsonl"),
+        dataset_sha256=base.dataset_sha256,
+        coverage_problems=[],
+        reasoning="on",
+        version="agent",
+        prompt_sha256=prompt_sha256,
+    )
+
+
+def test_load_runs_accepts_a_workflow_run_and_an_agent_run_with_different_prompts(
+    tmp_path: Path,
+) -> None:
+    """The two versions have different prompts by design and still share a table."""
+    workflow = _save(_report("gemini-2.5-flash", ["APPLY", "SKIP", "SKIP", "SKIP"]), tmp_path, "w")
+    agent = _save(_agent_report(["APPLY", "SKIP", "SKIP", "SKIP"]), tmp_path, "a")
+
+    reports = load_runs([workflow, agent])
+
+    assert [report.version for report in reports] == ["workflow", "agent"]
+    assert reports[0].prompt_sha256 != reports[1].prompt_sha256
+
+
+def test_load_runs_rejects_two_agent_runs_with_different_prompts(tmp_path: Path) -> None:
+    """Within one version a changed prompt makes runs incomparable."""
+    first = _save(_agent_report(["APPLY", "SKIP", "SKIP", "SKIP"]), tmp_path, "a")
+    changed = _agent_report(["APPLY", "SKIP", "SKIP", "SKIP"], prompt_sha256="other-prompt")
+    second = _save(changed, tmp_path, "b")
+
+    with pytest.raises(CompareError, match="not comparable"):
+        load_runs([first, second])
+
+
+def test_agent_run_is_named_as_such_in_the_model_table() -> None:
+    """A row of the model table says when the agent produced it."""
+    rows = rows_from_reports([_agent_report(["APPLY", "SKIP", "SKIP", "SKIP"])])
+
+    assert rows[1].name == "gemini-2.5-flash (agent, reasoning on)"
+
+
+def test_version_table_shows_model_and_tool_calls_per_posting() -> None:
+    """Each run is one row; repeated runs of a version are numbered."""
+    workflow = _report("gemini-2.5-flash", ["APPLY", "SKIP", "SKIP", "SKIP"])
+    agent = _agent_report(["APPLY", "SKIP", "SKIP", "PREPARE"])
+
+    table = format_version_table([workflow, agent, agent])
+
+    lines = table.splitlines()
+    assert lines[0].endswith("| Avg. model calls | Avg. tool calls |")
+    assert lines[2] == "| Workflow, run 1 | 75.0% | 0.50 | $0.08 | 2.0 s | 1.00 | 0.00 |"
+    assert lines[3] == "| Agent, run 1 | 100.0% | 0.00 | $0.08 | 2.0 s | 3.00 | 2.00 |"
+    assert lines[4].startswith("| Agent, run 2 |")
+
+
+def test_version_table_treats_an_old_run_file_as_one_model_call(tmp_path: Path) -> None:
+    """Run files from before Phase 4 load as workflow runs with one call per posting."""
+    report = _report("gemini-2.5-flash", ["APPLY", "SKIP", "SKIP", "SKIP"])
+    new_fields = {"version", "mean_model_calls", "mean_tool_calls", "tool_call_counts"}
+    path = tmp_path / "old.json"
+    path.write_text(report.model_dump_json(exclude=new_fields), encoding="utf-8")
+
+    loaded = load_runs([path])[0]
+
+    assert (loaded.version, loaded.mean_model_calls) == ("workflow", None)
+    assert "| Workflow, run 1 | 75.0% | 0.50 | $0.08 | 2.0 s | 1.00 | 0.00 |" in (
+        format_version_table([loaded])
+    )
+
+
+def test_main_prints_the_version_table_on_request(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--table versions`` switches to the workflow-vs-agent table."""
+    workflow = _save(_report("gemini-2.5-flash", ["APPLY", "SKIP", "SKIP", "SKIP"]), tmp_path, "w")
+    agent = _save(_agent_report(["APPLY", "SKIP", "SKIP", "SKIP"]), tmp_path, "a")
+
+    exit_code = main([str(workflow), str(agent), "--table", "versions"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "| Agent, run 1 |" in output
+    assert "Baseline" not in output

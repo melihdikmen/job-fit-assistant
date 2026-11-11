@@ -10,15 +10,16 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, LLMResponse, generate_json
 from job_fit.rules import apply_rules
 from job_fit.schema import DecisionLabel, JobDecision
 
 LLMCall = Callable[..., LLMResponse]
+DecideFn = Callable[..., "DecisionResult"]
 ReasoningSetting = Literal["default", "on", "off"]
 
 REASONING_SETTINGS: tuple[ReasoningSetting, ...] = get_args(ReasoningSetting)
@@ -72,6 +73,23 @@ class DecisionError(RuntimeError):
     """The model did not produce a valid decision within the allowed attempts."""
 
 
+class ToolCallRecord(BaseModel):
+    """One tool call an agent made: what it called and with which arguments.
+
+    The tool's result is not kept: ``get_cv_section`` returns CV text, which must not
+    end up in logs or run files.
+
+    Attributes:
+        name: Tool name.
+        arguments: Arguments the model passed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    arguments: dict[str, Any]
+
+
 @dataclass(frozen=True)
 class DecisionResult:
     """Final decision for one posting, with the cost of producing it.
@@ -84,7 +102,9 @@ class DecisionResult:
         input_tokens: Prompt tokens, summed over all attempts.
         output_tokens: Generated tokens, summed over all attempts.
         latency_s: Seconds spent in LLM calls, summed over all attempts.
-        attempts: Number of LLM calls made (1, or 2 after a schema retry).
+        attempts: Number of LLM calls made: 1, or 2 after a schema retry, for the
+            workflow; one per step for the agent.
+        tool_calls: Tool calls made, in order. Always empty for the workflow.
     """
 
     decision: JobDecision
@@ -95,6 +115,7 @@ class DecisionResult:
     output_tokens: int
     latency_s: float
     attempts: int
+    tool_calls: tuple[ToolCallRecord, ...] = ()
 
 
 def reasoning_flag(setting: ReasoningSetting) -> bool | None:
@@ -231,9 +252,12 @@ def format_result(result: DecisionResult) -> str:
         result: Result returned by ``decide``.
 
     Returns:
-        The decision as indented JSON followed by rule, token and latency lines.
+        The decision as indented JSON followed by rule, token and latency lines, and
+        the tool calls if there were any.
     """
     fired = ", ".join(result.fired_rules) or "none"
+    tool_lines = [f"tool calls:    {len(result.tool_calls)}"] if result.tool_calls else []
+    tool_lines += [f"  {call.name}({call.arguments})" for call in result.tool_calls]
     return "\n".join(
         [
             result.decision.model_dump_json(indent=2),
@@ -246,6 +270,7 @@ def format_result(result: DecisionResult) -> str:
             f"output tokens: {result.output_tokens}",
             f"latency:       {result.latency_s:.2f} s",
             f"attempts:      {result.attempts}",
+            *tool_lines,
         ]
     )
 
@@ -270,16 +295,17 @@ def add_llm_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None, description: str) -> argparse.Namespace:
     """Parse command-line arguments.
 
     Args:
         argv: Arguments without the program name; None reads ``sys.argv``.
+        description: What the command does, for ``--help``.
 
     Returns:
         Parsed arguments.
     """
-    parser = argparse.ArgumentParser(description="Decide APPLY / PREPARE / SKIP for one posting.")
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--posting", type=Path, required=True, help="Path to the posting text.")
     parser.add_argument("--model", required=True, help="Model id, as the provider names it.")
     parser.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help="Path to the CV.")
@@ -288,23 +314,28 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the workflow for one posting file and print the result.
+def run_cli(argv: Sequence[str] | None, decide_fn: DecideFn, description: str) -> int:
+    """Decide one posting file with the given version and print the result.
+
+    Shared by the workflow and agent command lines, which differ only in the function
+    that makes the decision.
 
     Args:
         argv: Arguments without the program name; None reads ``sys.argv``.
+        decide_fn: Function with the signature of ``decide``.
+        description: What the command does, for ``--help``.
 
     Returns:
         Process exit code: 0 on success, 1 on a handled error.
     """
-    args = _parse_args(argv)
+    args = _parse_args(argv, description)
     # Postings contain characters the default Windows console encoding cannot print.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
         posting_text = args.posting.read_text(encoding="utf-8")
         cv = args.cv.read_text(encoding="utf-8")
-        result = decide(
+        result = decide_fn(
             posting_text,
             cv,
             model=args.model,
@@ -317,6 +348,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(format_result(result))
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the workflow for one posting file and print the result.
+
+    Args:
+        argv: Arguments without the program name; None reads ``sys.argv``.
+
+    Returns:
+        Process exit code: 0 on success, 1 on a handled error.
+    """
+    return run_cli(argv, decide, "Decide APPLY / PREPARE / SKIP for one posting.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Tests for the eval runner. The workflow is always a fake; nothing goes to the network."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from job_fit.eval import (
 )
 from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError
 from job_fit.schema import JobDecision
-from job_fit.workflow import DecisionError, DecisionResult
+from job_fit.workflow import DecisionError, DecisionResult, ToolCallRecord
 
 MODEL = "gemini-2.5-flash"
 CV = "CV-MARKER seven years of React Native."
@@ -377,7 +378,7 @@ def test_save_report_marks_a_non_default_reasoning_setting_in_the_name(tmp_path:
     path = save_report(report, tmp_path, STARTED_AT)
 
     assert path.name == f"2026-11-10_153005_{MODEL}_reasoning-off.json"
-    assert f"({'vertex'}, {LOCATION}, reasoning off)" in format_report(report)
+    assert f"(workflow, vertex, {LOCATION}, reasoning off)" in format_report(report)
 
 
 def test_local_model_run_costs_nothing() -> None:
@@ -559,3 +560,137 @@ def test_main_returns_error_when_the_run_is_aborted(
     assert exit_code == 1
     assert "expired login" in capsys.readouterr().err
     assert not (tmp_path / "results").exists()
+
+
+def _agent_result(decision: str, check_rules_location: str = "Istanbul, Türkiye") -> DecisionResult:
+    """Build an agent result: 3 model calls, two CV reads and one check_rules call."""
+    check_rules_args = {
+        "location": check_rules_location,
+        "work_mode": "hybrid",
+        "english_required": False,
+        "seniority": "senior",
+    }
+    return replace(
+        _decision_result(decision),
+        attempts=3,
+        tool_calls=(
+            ToolCallRecord(name="get_cv_section", arguments={"topic": "experience"}),
+            ToolCallRecord(name="get_cv_section", arguments={"topic": "skills"}),
+            ToolCallRecord(name="check_rules", arguments=check_rules_args),
+        ),
+    )
+
+
+def _agent_report(fake: FakeDecide, labels: list[str]) -> Any:
+    """Evaluate one posting per label with a fake agent and build the agent report."""
+    postings = [_posting(f"p-{index}", label) for index, label in enumerate(labels)]
+    results = evaluate(postings, CV, model=MODEL, decide_fn=fake)
+    return build_report(
+        results,
+        model=MODEL,
+        provider="vertex",
+        started_at=STARTED_AT,
+        dataset_path=Path("data/postings.jsonl"),
+        dataset_sha256="abc",
+        coverage_problems=[],
+        version="agent",
+        prompt_sha256="agent-prompt",
+    )
+
+
+def test_agent_report_averages_model_and_tool_calls_over_answered_postings() -> None:
+    """A failed posting has no calls and is left out of the means."""
+    fake = FakeDecide(_agent_result("APPLY"), _agent_result("SKIP"), DecisionError("no steps left"))
+
+    report = _agent_report(fake, ["APPLY", "SKIP", "SKIP"])
+
+    assert report.version == "agent"
+    assert report.mean_model_calls == 3.0
+    assert report.mean_tool_calls == 3.0
+    assert report.tool_call_counts == {"get_cv_section": 4, "check_rules": 2}
+    assert report.results[0].tool_calls[0].arguments == {"topic": "experience"}
+
+
+def test_agent_report_counts_when_check_rules_matches_the_rules_in_code() -> None:
+    """The tool's answer is recomputed from its arguments and compared with the fired rules."""
+    agrees = _agent_result("APPLY")
+    told_no_violation_but_code_fired = replace(_agent_result("SKIP"), fired_rules=("location",))
+    told_violation_and_code_fired = replace(
+        _agent_result("SKIP", check_rules_location="Bursa, Türkiye"), fired_rules=("location",)
+    )
+    fake = FakeDecide(agrees, told_no_violation_but_code_fired, told_violation_and_code_fired)
+
+    report = _agent_report(fake, ["APPLY", "SKIP", "SKIP"])
+
+    assert (report.check_rules_called, report.check_rules_agreed) == (3, 2)
+
+
+def test_workflow_report_has_one_model_call_and_no_tool_calls() -> None:
+    """The workflow's numbers fill the same columns as the agent's."""
+    report = _report([_posting("a", "APPLY")], FakeDecide(_decision_result("APPLY")))
+
+    assert (report.version, report.mean_model_calls, report.mean_tool_calls) == ("workflow", 1.0, 0)
+    assert report.tool_call_counts == {}
+    assert report.prompt_sha256 == eval_module.workflow_prompt_sha256()
+
+
+def test_formatted_agent_report_shows_steps_tools_and_rule_agreement() -> None:
+    """The agent block appears only for agent runs."""
+    agent_text = format_report(_agent_report(FakeDecide(_agent_result("APPLY")), ["APPLY"]))
+    workflow_text = format_report(
+        _report([_posting("a", "APPLY")], FakeDecide(_decision_result("APPLY")))
+    )
+
+    assert "(agent, vertex, reasoning default)" in agent_text
+    assert "steps:    3.00 model calls mean per posting" in agent_text
+    assert "tools:    3.00 calls mean per posting (get_cv_section 2, check_rules 1)" in agent_text
+    assert "check_rules called for 1 postings" in agent_text
+    assert "steps:" not in workflow_text
+
+
+def test_save_report_marks_an_agent_run_in_the_name(tmp_path: Path) -> None:
+    """An agent run cannot be mistaken for a workflow run of the same model."""
+    report = _agent_report(FakeDecide(_agent_result("APPLY")), ["APPLY"])
+
+    path = save_report(report, tmp_path, STARTED_AT)
+
+    assert path.name == f"2026-11-10_153005_{MODEL}_agent.json"
+
+
+def test_main_version_agent_runs_the_agent_and_hashes_its_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--version agent`` picks the agent's decide function and records the agent prompt."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--version", "agent", "--reasoning", "on"]
+    fake = FakeDecide(*[_agent_result(label) for label in COMPLETE_LABELS])
+    monkeypatch.setitem(eval_module.DECIDE_FUNCTIONS, "agent", fake)
+
+    exit_code = main(argv, clock=lambda: STARTED_AT)
+
+    run_file = tmp_path / "results" / f"2026-11-10_153005_{MODEL}_agent_reasoning-on.json"
+    saved = json.loads(run_file.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(fake.calls) == 20
+    assert saved["version"] == "agent"
+    assert saved["prompt_sha256"] != eval_module.workflow_prompt_sha256()
+    assert saved["results"][0]["tool_calls"][0] == {
+        "name": "get_cv_section",
+        "arguments": {"topic": "experience"},
+    }
+    assert "CV-MARKER" not in run_file.read_text(encoding="utf-8")
+
+
+def test_main_default_version_runs_the_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``--version`` the fixed workflow decides."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS)
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+    monkeypatch.setitem(eval_module.DECIDE_FUNCTIONS, "workflow", fake)
+
+    exit_code = main(argv, clock=lambda: STARTED_AT)
+
+    saved_text = next((tmp_path / "results").iterdir()).read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert len(fake.calls) == 20
+    assert json.loads(saved_text)["version"] == "workflow"
