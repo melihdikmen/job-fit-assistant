@@ -10,7 +10,7 @@
 | 3 – Model selection | ✅ | see `git log --grep phase-3` | chosen: `gemini-2.5-flash` with reasoning on, 71.4% / mean w.err 0.43 / $0.64 per 100 / 11.9 s; no local and no open-weight run (D7, D20); 195 tests |
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
-| 6 – UI (optional) | ⬜ | | |
+| 6 – UI (optional) | 🟡 | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; committed, **push waits for the candidate's go-ahead** (D37) |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
 
@@ -126,6 +126,18 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   account's GitHub `noreply` address.
 - The candidate answered D28–D31 on 2026-11-11 without objecting to the Phase 5 plan;
   Claude took that as approval of the plan.
+
+- D34 (2026-11-11): `gradio` is a normal runtime dependency, not an optional extra.
+- D35 (2026-11-11): the page offers only configurations measured in Phase 3:
+  `gemini-2.5-flash` reasoning on (default), `gemini-2.5-flash` reasoning off and
+  `gemini-3.1-flash-lite`. `gemini-4-carbon` is left out. The agent can be combined with
+  any of them; the page notes that only the default was measured.
+- D36 (2026-11-11): the CV is read from `data/cv.md` on every request; the page shows
+  only the path and has no CV input.
+- D37 (2026-11-11): Phase 6 is pushed to GitHub after the pre-push check and the
+  candidate's go-ahead.
+- The candidate answered D34-D37 as proposed on 2026-11-11 without objecting to the
+  Phase 6 plan; Claude took that as approval of the plan.
 
 ## What the candidate does (Claude cannot)
 
@@ -1130,6 +1142,147 @@ relabeling the test set.
 
 ---
 
-## Phase 6 – UI, optional (roadmap)
+## Phase 6 – UI, optional (in progress)
 
-- Gradio app: paste a posting, choose model and version, see `JobDecision` and cost.
+Source: [PROCESS.md §5 Phase 6](PROCESS.md#phase-6--optional-ui): "Gradio: paste a
+posting, choose model and version (workflow/agent), see the `JobDecision` and the cost."
+
+State at the start (checked 2026-11-11): working tree clean on `main`, 322 tests;
+`gradio` is not a dependency; `workflow.decide` and `agent.decide_with_agent` share one
+keyword signature and return the same `DecisionResult` (decision, LLM decision before
+rules, fired rules, tokens, latency, attempts, tool calls);
+`pricing.call_cost_usd(provider, model, input_tokens, output_tokens)` already turns
+tokens into USD; `tests/conftest.py` refuses every socket connection, so no test can
+start a web server.
+
+The UI is a thin shell. It adds no decision logic, no prompt and no schema change, so
+the prompt hashes and every number in `docs/results.md` stay valid.
+
+### Before coding (candidate)
+- [x] Answer D34–D37 (all decided as proposed, see Decided).
+- [x] Approve this plan.
+
+### Design
+
+| Question | Answer | Why |
+|---|---|---|
+| Where does the logic live? | `ui.py` has a pure handler `run_decision(posting_text, choice, version, *, cv_loader, decide_fns) -> DecisionView` and a separate `build_app()` that only wires Gradio components to it. | The handler is testable with fakes, without Gradio and without a server (python-style: logic pure, I/O at the edges). |
+| How are model choices defined? | One named table `MODEL_CHOICES`: label → (provider, model id, reasoning). Only Vertex rows (D35). | The agent supports only `vertex`; a free-text model box would invite ids that have no price or return 404. |
+| What does the page show? | Decision (large), rationale, the other `JobDecision` fields as a table, fired rules and the LLM's decision before the rules, input/output tokens, cost in USD for this posting (and "price unknown" if `call_cost_usd` returns `None`), latency, model calls, and for the agent the tool calls in order (name and arguments). | The cost and the rule overrides are the point of the project; hiding them would make the UI a demo of the model only. |
+| What happens on an error? | Empty posting → message, no model call. `LLMError` / `DecisionError` → one readable line in the page, no traceback, no CV or posting text in it. | Same failure types eval already handles; a stack trace in a browser can leak the project id (R11). |
+| Who can reach the page? | `launch(server_name="127.0.0.1", share=False)`. No `--share` flag at all. | A share link would publish a page that sends the candidate's CV to a model for anyone who has the URL. |
+| What leaves the machine? | Only the LLM call, as before. Gradio analytics are switched off (`analytics_enabled=False` and the `GRADIO_ANALYTICS_ENABLED` variable), flagging is off, nothing is written to disk, posting text and CV are not logged. | AGENTS.md: no personal data beyond the CV and posting texts in logs; Gradio's flagging saves inputs to a folder and its analytics call home by default. |
+| Human control? | The page has one button, "Decide". No apply, send, open-link or save action. The text under the result states that it is a recommendation. | PROCESS.md Phase 5: the tool only recommends. |
+
+### Steps
+1. [x] Dependency and a spike. `uv add gradio` (or as an extra, D34); read the installed
+       version's documentation instead of recalling the API. A throw-away script in
+       the scratchpad settles: the Blocks/launch API of that version; how analytics
+       and flagging are switched off and whether merely importing `gradio` or building
+       a `Blocks` opens a socket (the test suite forbids it); how an error is shown
+       without a traceback. Findings are written here; the script is not committed.
+2. [x] `tests/test_harness.py`: add `gradio` to `ALLOWED_RUNTIME_DEPENDENCIES` in the
+       same change as `pyproject.toml`, since the post-edit hook runs that test.
+3. [x] `ui.py` – pure part
+       - `MODEL_CHOICES`, `DEFAULT_MODEL_CHOICE`, `VERSIONS = ("workflow", "agent")`.
+       - `DecisionView` (frozen dataclass): the strings and rows the page displays.
+       - `run_decision(...)`: validate input, load the CV (D36), call the `decide_fn`
+         of the chosen version, compute the cost, map everything to `DecisionView`;
+         map `LLMError`, `DecisionError` and a missing CV file to an error view.
+       - `format_cost(cost_usd)`: fractions of a cent need more digits than `$0.01`.
+4. [x] `ui.py` – Gradio part
+       - `build_app(decide_fns=..., cv_path=...) -> gr.Blocks`: posting textbox, model
+         dropdown, version radio, "Decide" button, the outputs above.
+       - `main(argv)`: `uv run python -m job_fit.ui [--port 7860] [--cv data/cv.md]`,
+         bound to localhost.
+5. [x] Tests (no network, no real LLM, no server started)
+       - `test_ui.py`: workflow and agent routed to the right fake; the chosen row's
+         provider, model and reasoning reach it; cost equals `call_cost_usd` for the
+         fake's tokens (derived from the price table, not typed by hand); unknown
+         price → "price unknown"; rule override shows both decisions and the rule
+         name; agent tool calls listed in order; empty posting makes no call;
+         `LLMError` and `DecisionError` become an error view that contains neither CV
+         nor posting text; missing CV file → clear message; every `MODEL_CHOICES`
+         row has a price and provider `vertex`; `build_app()` builds without
+         launching (if the spike shows it opens no socket).
+6. [x] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`; show output.
+7. [x] Live check, output shown: start the app, run one sample posting from
+       `data/samples/` through the workflow and once through the agent, compare the
+       decision, tokens and cost with the CLI output for the same posting, and check
+       an empty posting. The page is driven through Gradio's local API (or a browser
+       if the candidate prefers to click); a screenshot is not committed, because it
+       would show a real posting next to a real decision about the candidate.
+8. [x] `README.md`: a short "Web page" section (how to start it, what it shows, that it
+       is local-only and only recommends). `AGENTS.md`: `ui` in the folder line and
+       the run command, staying within 40 lines.
+9. [~] `ruff format`, commit `phase-6: gradio ui`, update the status table; push only
+       after the pre-push check and the candidate's go-ahead (D37).
+
+### Results (2026-11-11)
+
+`ruff check` and `ruff format --check` clean; 350 tests pass (322 at the start, 28 new
+in `tests/test_ui.py`).
+
+**Spike findings (step 1).** Installed: `gradio` 6.31.0.
+- Importing `gradio` opens no socket. Building a `Blocks` object does: it creates an
+  asyncio event loop, which on Windows connects a loopback socket pair, and the test
+  suite refuses every connection. So there is no `build_app()` test; the wiring is
+  covered by the live check.
+- Analytics are switched off per app (`Blocks(analytics_enabled=False)`) and by the
+  `GRADIO_ANALYTICS_ENABLED` variable; both are set.
+- Flagging exists only on `gr.Interface`, not on `Blocks`, so there is nothing to
+  switch off. `launch` is called with `share=False`, `ssr_mode=False`,
+  `mcp_server=False`, `pwa=False`.
+- Handled errors are returned as a view with a message, so Gradio's error path (and
+  its traceback option) is not used.
+
+**Live check (step 7).** The page was started on `127.0.0.1` and driven through its
+local API with `data/samples/izmir-senior-software-engineer.txt`, default model.
+
+| Request | Decision | Before rules | Rules fired | Tokens in / out | Cost | Latency | Model / tool calls |
+|---|---|---|---|---|---|---|---|
+| empty posting | none, message shown | – | – | 0 / 0 | – | – | 0 / 0 |
+| workflow | SKIP | SKIP | location | 2,619 / 2,649 | $0.0074 | 17.7 s | 1 / 0 |
+| agent | SKIP | SKIP | location | 7,428 / 1,896 | $0.0070 | 12.7 s | 3 / 3 |
+
+- The workflow row has the same tokens, decision and rule as the Phase 1 CLI run of
+  this posting (2,619 / 2,649, SKIP, location), and the cost is the price table applied
+  to those tokens (2,619 × 0.30 + 2,649 × 2.50 per 1M = $0.0074).
+- Share URL: none. Host names looked up while the app was built, launched and idle:
+  none besides `127.0.0.1`. During a decision: `aiplatform.googleapis.com` and
+  `oauth2.googleapis.com` (the model call). The test client used to drive the page
+  (`gradio_client`) looks up `huggingface.co` on its own; the app does not.
+- The page was not looked at in a browser by Claude; layout and readability are for
+  the candidate to judge.
+
+**Deviations from the plan above**
+- `run_decision` takes `load_cv` (a function returning the CV text) and `decide_fns`;
+  the name in the plan was `cv_loader`.
+- Model text (rationale, extracted facts, tool arguments, error messages) is shown in
+  plain-text components and tables, never as Markdown or HTML. Not in the plan: a
+  posting could talk the model into writing an image link, which a Markdown component
+  would load, sending whatever is in the URL to another server.
+- `README.md`: "never ... opens a web page" became "never ... visits a job site",
+  because the tool now serves a local page.
+- `main` checks at start that the CV file exists (exit code 1), in addition to reading
+  it on every request (D36).
+
+**Done when:** `uv run python -m job_fit.ui` opens a local page where a pasted posting,
+a model and a version give the `JobDecision` and the cost; tests and lint pass.
+
+**Not in this phase:** new eval runs or result tables, prompt or schema changes,
+OpenRouter/Ollama choices in the page, fetching a posting from a URL, file upload, CV
+editing, history of past decisions, login, deployment or a public link, streaming.
+
+**Risks**
+- Gradio is a large dependency (web server, many transitive packages). It is imported
+  only by `ui.py`; nothing else in the package depends on it.
+- The API differs between Gradio major versions; step 1 reads the installed version
+  instead of trusting memory.
+- If building a `Blocks` object needs a socket, the build test is dropped and the
+  wiring is covered by the live check only; the handler tests are unaffected.
+- A decision takes about 12 s (workflow) to 15 s (agent) with the default choice; the
+  page shows a progress state, not a streamed answer.
+- Spend: two or three live decisions, about 2 cents at list price.
+- Running the agent with a model other than the default is unmeasured (D35); the page
+  says so next to the choice.

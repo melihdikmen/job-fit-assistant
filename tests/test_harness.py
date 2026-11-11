@@ -18,10 +18,11 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 # Everything the package may import at runtime. All of it serves one purpose: asking a
 # model for a decision and validating the answer. A library that could act for the
 # candidate (browser automation, e-mail, form filling, job-board clients) must not be
-# added without changing this list on purpose.
+# added without changing this list on purpose. `gradio` serves the local page only.
 ALLOWED_RUNTIME_DEPENDENCIES = frozenset(
     {
         "google-genai",
+        "gradio",
         "langchain",
         "langchain-google-genai",
         "openai",

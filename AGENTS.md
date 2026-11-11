@@ -7,11 +7,11 @@ in code and override the LLM. It measures accuracy, cost and latency on a labele
 
 ## Commands
 - Install: `uv sync` · Test: `uv run pytest` · Lint: `uv run ruff check .` · Format: `uv run ruff format .`
-- Eval: `uv run python -m job_fit.eval --model <model> [--version agent] --allow-incomplete`
+- Eval: `uv run python -m job_fit.eval --model <model> [--version agent] --allow-incomplete` · Page: `uv run python -m job_fit.ui`
 - Hook: `.claude/settings.json` runs ruff and pytest after every edit of a `.py` file or `pyproject.toml`.
 
 ## Folders
-- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools)
+- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools, ui)
 - `data/cv.md` – candidate CV (git-ignored); `data/postings.jsonl` – labeled test set; `data/results/` – run outputs (git-ignored)
 - `tests/` – pytest suite; `docs/results.md` – result tables; `.claude/hooks/` – post-edit check
 

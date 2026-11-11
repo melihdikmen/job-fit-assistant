@@ -15,8 +15,8 @@ Built as the Week 1 project of an AI FDE course.
 
 ## The tool only recommends
 
-It reads text and prints a decision. It never applies to a job, sends a message, fills
-in a form or opens a web page; the person reads the recommendation and acts on it.
+It reads text and shows a decision. It never applies to a job, sends a message, fills
+in a form or visits a job site; the person reads the recommendation and acts on it.
 Two tests keep it that way: the runtime dependencies must match an allow-list, and the
 agent's tool set must be exactly its three read-only tools
 ([tests/test_harness.py](tests/test_harness.py)).
@@ -65,6 +65,18 @@ Decide one posting:
 ```
 uv run python -m job_fit.workflow --posting data/samples/accenture-software-engineer.txt --model gemini-2.5-flash
 ```
+
+Or use the local web page: paste a posting, choose a model and a version (workflow or
+agent), and see the decision, the rationale, the rules that fired, tokens, latency and
+the cost of that one decision at list price:
+
+```
+uv run python -m job_fit.ui               # then open http://127.0.0.1:7860
+```
+
+The page listens on this machine only and has no share-link option, because every
+request sends the CV in `data/cv.md` to the chosen model. It has one button, "Decide",
+and stores nothing. Gradio's usage analytics are switched off.
 
 Evaluate a model on the labeled set (`data/postings.jsonl`); this prints accuracy, the
 confusion matrix, the weighted error, the baselines, tokens, cost and latency, lists
@@ -162,6 +174,7 @@ src/job_fit/
   pricing.py    dated list prices
   eval.py       run a model over the set, report, save
   compare.py    tables and Pareto front from saved runs
+  ui.py         local Gradio page around the workflow and the agent
 data/           postings.jsonl (labeled set), postings/, samples/, cv.example.md
 tests/          pytest suite, no network
 docs/results.md full results
