@@ -1,7 +1,7 @@
 # Architecture
 
-_Drafted by Claude from the measurements in [results.md](results.md); not yet confirmed by
-the candidate. The wording of the three traps must be checked against the course notes._
+_Drafted by Claude from the measurements in [results.md](results.md) and confirmed by the
+candidate on 2026-11-22._
 
 ## The business problem
 

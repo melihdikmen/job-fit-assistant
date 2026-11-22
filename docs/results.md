@@ -534,7 +534,7 @@ figure. No control run was made (it was planned only after a win).
 
 ### Keep or drop
 
-_Drafted by Claude from the numbers above; not yet confirmed by the candidate._
+_Drafted by Claude from the numbers above and confirmed by the candidate on 2026-11-22._
 
 Drop. The sub-agent does not improve the weighted error beyond the noise in either
 pair, and it does not reach the cost bar either. It answers a question the errors never

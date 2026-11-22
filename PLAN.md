@@ -12,7 +12,7 @@
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
 | 7 – Evals & observability | ✅ | see `git log --grep phase-7` | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests; pushed to GitHub 2026-11-22. conclusion paragraph confirmed by the candidate (D48) |
-| 8 – Agent architecture | 🟡 | see `git log --grep phase-8` | steps 1–12 done 2026-11-22; sub-agent **dropped** by the rule of D52 (weighted error 0.51 → 0.48 with reasoning on, 0.40 → 0.37 off; noise 0.077); 528 tests; open: the candidate confirms `docs/architecture.md` and the keep/drop paragraph, then the push |
+| 8 – Agent architecture | ✅ | see `git log --grep phase-8` | done 2026-11-22; sub-agent **dropped** by the rule of D52 (weighted error 0.51 → 0.48 with reasoning on, 0.40 → 0.37 off; noise 0.077); 528 tests; `docs/architecture.md` and the keep/drop paragraph confirmed by the candidate (D54); pushed to GitHub 2026-11-22 |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
 | 11 – Self-improvement | ⬜ | | roadmap only |
@@ -221,6 +221,10 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   the agent (D27), but is offered nowhere.
 - The candidate accepted D49–D53 as proposed on 2026-11-22 and told Claude to go on;
   Claude took that as approval of the Phase 8 plan.
+- D54 (2026-11-22): the candidate confirmed `docs/architecture.md` (including the wording
+  of the three traps) and the paragraph "Keep or drop" in `docs/results.md` as drafted,
+  without edits, and gave the go-ahead for the push. Phase 8 is closed; the sub-agent
+  stays dropped (D52, D53).
 
 ## What the candidate does (Claude cannot)
 
@@ -1701,7 +1705,7 @@ LangGraph; parallel runs.
 
 ---
 
-## Phase 8 – Agent architecture (in progress)
+## Phase 8 – Agent architecture (done)
 
 Source: [PROCESS.md §7 Phase 8](PROCESS.md#phase-8--agent-architecture-logic-in-code-sub-agents)
 
@@ -1807,9 +1811,10 @@ Step 3 writes the full table; these are the findings the plan is built on.
 12. [x] `docs/results.md`: a section "Sub-agent experiment (Phase 8)" with the table
         from `compare`, the rule, the decision and how much to trust it. `README.md`:
         link to the architecture page. If kept (D53): the choice on the page.
-13. [~] `AGENTS.md` (folder line, command, lessons), results and findings recorded here,
+13. [x] `AGENTS.md` (folder line, command, lessons), results and findings recorded here,
         `ruff format`, commit `phase-8: agent architecture`; push after the pre-push
-        check and the candidate's go-ahead.
+        check and the candidate's go-ahead. Both documents confirmed by the candidate
+        and pushed on 2026-11-22 (D54).
 
 ### Results of steps 1–8 (2026-11-22)
 
