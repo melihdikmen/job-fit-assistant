@@ -11,7 +11,7 @@
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
-| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests. Open: candidate confirms the conclusion draft in `docs/results.md`; push |
+| 7 – Evals & observability | ✅ | see `git log --grep phase-7` | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests; pushed to GitHub 2026-11-22. Still open: the conclusion draft at the end of `docs/results.md` is not confirmed by the candidate |
 | 8 – Agent architecture | ⬜ | | roadmap only |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
@@ -1375,7 +1375,7 @@ Rules that hold for all of Week 2:
 
 ---
 
-## Phase 7 – Better evals and observability (in progress)
+## Phase 7 – Better evals and observability (done)
 
 Source: [PROCESS.md §7 Phase 7](PROCESS.md#phase-7--better-evals-and-observability)
 
@@ -1477,7 +1477,7 @@ These are the parts only the candidate can do. Steps 1–8 need none of them.
         relabeling, the judge check, and what kappa shows that accuracy did not. The
         Week 1 tables stay, marked as the old set. The candidate edits or approves the
         conclusions.
-12. [~] `README.md` (what now leaves the machine: traces), `AGENTS.md` (held-out rule,
+12. [x] `README.md` (what now leaves the machine: traces), `AGENTS.md` (held-out rule,
         new commands, lessons), record results here, commit
         `phase-7: evals and observability`; push after the pre-push check and the
         candidate's go-ahead.
@@ -1607,6 +1607,12 @@ per configuration, no failed call and no schema retry. Workflow prompt SHA-256
   must not be used as a criterion in Phase 11 as it stands.
 - Spend at list price: about $1.30 for the 12 runs, $1.95 for the judge with its
   trials, a few cents for smoke runs and probes.
+
+**Push (step 12).** Pre-push check on the four Phase 7 commits: no `.env`, CV, run file or
+label notes tracked; no key-like string except the fake `sk-lf-test` in a test; no Google
+Cloud project id; `noreply` author. Pushed on the candidate's go-ahead and verified with
+`git ls-remote`. The candidate gave the go-ahead for the push only; the conclusion draft
+in `docs/results.md` keeps its "not yet confirmed" mark until the candidate says otherwise.
 
 ### Findings to carry into Phase 8
 
