@@ -11,7 +11,7 @@
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
-| 7 – Evals & observability | ✅ | see `git log --grep phase-7` | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests; pushed to GitHub 2026-11-22. Still open: the conclusion draft at the end of `docs/results.md` is not confirmed by the candidate |
+| 7 – Evals & observability | ✅ | see `git log --grep phase-7` | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests; pushed to GitHub 2026-11-22. conclusion paragraph confirmed by the candidate (D48) |
 | 8 – Agent architecture | ⬜ | | roadmap only |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
@@ -192,6 +192,11 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   2026-11-22): about $0.018 and 13 s per rationale on a 3-rationale trial, about $2 for
   the pass, inside the $3 ceiling of the plan. The candidate was told in the chat and
   can reverse it; the judge files name the model that produced them.
+
+- D48 (2026-11-22): the candidate confirmed the paragraph "What this means for the Week 1
+  conclusions" in `docs/results.md` as drafted. The Week 1 choice does not hold up on the
+  new set, but nothing is switched yet: Phases 8 and 11 first look for why the workflow
+  with reasoning on rates good jobs as SKIP. The held-out set stays closed until then.
 
 ## What the candidate does (Claude cannot)
 
@@ -1619,8 +1624,8 @@ in `docs/results.md` keeps its "not yet confirmed" mark until the candidate says
 - The Week 1 conclusions are open again. On this set the chosen configuration
   (workflow, reasoning on) is the worst on weighted error and the agent the best, by
   twice the noise figure; the workflow with reasoning off is within noise of the agent
-  at a fifth of the cost. A draft of what this means is at the end of
-  `docs/results.md`, **not yet confirmed by the candidate**.
+  at a fifth of the cost. What this means is at the end of `docs/results.md`,
+  confirmed by the candidate (D48).
 - The one thing to explain is why the workflow with reasoning on talks itself into
   SKIP for good jobs. The agent prompt and the reasoning-off workflow do not.
 - Miny (APPLY), Fuzul mobile architecture (SKIP) and Turkcell senior mobile (SKIP) are

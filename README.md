@@ -167,8 +167,9 @@ Dev set, 27 postings, three runs per configuration, mean ± standard deviation.
 - A judge model rated the rationales 4.1 to 4.6 out of 5, but it agreed with the
   candidate's own scores on only 4 of 10 rationales, so that score is reported and not
   relied on.
-- The held-out set has not been run. Whether to change the Week 1 choice is still
-  open; see the end of [docs/results.md](docs/results.md).
+- The held-out set has not been run. The Week 1 choice is not changed yet:
+  the next phases look for why that workflow rates good jobs as `SKIP`; see the end of
+  [docs/results.md](docs/results.md).
 
 The two sections below are the Week 1 results, on the earlier set of 21 postings. They
 are not comparable with the table above.

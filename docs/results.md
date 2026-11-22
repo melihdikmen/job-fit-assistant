@@ -414,7 +414,7 @@ lines. Posting texts and the model's rationales are traced as they are.
 
 ### What this means for the Week 1 conclusions
 
-_Drafted by Claude from the numbers above. Not yet confirmed by the candidate._
+_Drafted by Claude from the numbers above and confirmed by the candidate on 2026-11-22._
 
 The Week 1 choice, the fixed workflow on `gemini-2.5-flash` with reasoning on, does not
 hold up on this set. It has the worst weighted error of the four configurations, by
