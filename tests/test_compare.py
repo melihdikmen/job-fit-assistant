@@ -481,3 +481,41 @@ def test_main_prints_the_week_2_tables_on_request(
 
     assert exit_code == 0
     assert expected in capsys.readouterr().out
+
+
+def _extractor_report(extractor_model: str, predictions: list[str | None]) -> EvalReport:
+    """Build a report of the extractor version with the given sub-agent model."""
+    base = _report("gemini-2.5-flash", predictions, reasoning="on")
+    return build_report(
+        base.results,
+        model=base.model,
+        provider=base.provider,
+        started_at=STARTED_AT,
+        dataset_path=Path(base.dataset_path),
+        dataset_sha256=base.dataset_sha256,
+        coverage_problems=[],
+        reasoning="on",
+        version="extractor",
+        prompt_sha256="extractor-prompt",
+        extractor_model=extractor_model,
+    )
+
+
+def test_extractor_runs_are_named_after_their_sub_agent(tmp_path: Path) -> None:
+    """A different sub-agent model is a different configuration, never the same row."""
+    predictions = ["APPLY", "SKIP", "SKIP", "SKIP"]
+    reports = [
+        _report("gemini-2.5-flash", predictions, reasoning="on"),
+        _extractor_report("gemini-3.1-flash-lite", predictions),
+        _extractor_report("gemini-3.1-flash-lite", predictions),
+        _extractor_report("gemini-2.5-flash", predictions),
+    ]
+    paths = [_save(report, tmp_path, f"run-{index}") for index, report in enumerate(reports)]
+
+    groups = group_runs(paths, load_runs(paths))
+
+    assert [(group.name, len(group.reports)) for group in groups] == [
+        ("gemini-2.5-flash (reasoning on)", 1),
+        ("gemini-2.5-flash (extractor gemini-3.1-flash-lite, reasoning on)", 2),
+        ("gemini-2.5-flash (extractor gemini-2.5-flash, reasoning on)", 1),
+    ]

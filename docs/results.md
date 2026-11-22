@@ -5,8 +5,8 @@ Costs use list prices per token, even when credits pay.
 > **Week 1 and Week 2.** The sections "Model comparison (Phase 3)" and "Workflow vs. agent
 > (Phase 4)" were measured on the Week 1 set of 21 postings. In Week 2 the set grew to 40
 > postings with labels confirmed by the candidate and was split into a dev and a held-out
-> part. The current numbers are in "Week 2 reference (Phase 7)" at the end; the two parts
-> are not comparable.
+> part. The current numbers are in "Week 2 reference (Phase 7)" and "Sub-agent experiment
+> (Phase 8)" at the end; the two parts are not comparable.
 
 > **Note (2026-11-11, after all runs below).** A code review in Phase 5 changed the
 > location rule in `rules.py`: names are matched as whole words, a location that names
@@ -433,3 +433,115 @@ narrow: why does the workflow with reasoning on talk itself into SKIP, and can a
 to it (Phase 8: fewer decisions left to the model; Phase 11: one guarded prompt change
 at a time) remove that mistake without the agent loop? The held-out set stays closed
 until that work is done.
+
+## Sub-agent experiment (Phase 8)
+
+One sub-agent was tried: a cheap model reads the facts from the posting before the main
+model judges the fit. Why it was this one, and what else Phase 8 looked at, is in
+[architecture.md](architecture.md).
+
+- **Extractor:** `gemini-3.1-flash-lite`, model default (no thinking). It sees the
+  posting only, never the CV, and returns `PostingFacts`: company, role, location, work
+  mode, English risk, seniority.
+- **Main model:** `gemini-2.5-flash`. It sees the posting and the CV and returns
+  `FitDecision`: rationale, matching skills, missing skills, decision. Its prompt is the
+  workflow's prompt without the extraction step; the three decision definitions are word
+  for word the same.
+- **Code** joins the two into the same `JobDecision` as before and applies the same hard
+  rules, on the extractor's facts.
+
+Same dev set as the reference (27 postings, dataset SHA-256 `02f2239aa4ad…`), Vertex AI
+`global`, 2026-11-22, three runs per row, no failed call and no schema retry. The
+workflow rows are the Phase 7 reference runs, not new runs. Generated with
+`uv run python -m job_fit.compare --table reference <run files>`; the judge column is
+left out because the judge is not a criterion.
+
+| Configuration | Runs | Accuracy | Weighted error (mean) | APPLY recall | Kappa | Cost per 100 postings | Avg. latency |
+|---|---|---|---|---|---|---|---|
+| Baseline (always SKIP) | – | 63.0% | 0.96 | 0.0% | 0.00 | $0.00 | 0.0 s |
+| Workflow, reasoning on | 3 | 65.4% ± 2.1% | 0.51 ± 0.06 | 44.4% ± 9.6% | 0.37 ± 0.04 | $0.62 | 11.4 s |
+| Extractor + main model, reasoning on | 3 | 64.2% ± 5.7% | 0.48 ± 0.06 | 38.9% ± 9.6% | 0.36 ± 0.09 | $0.58 | 12.3 s |
+| Workflow, reasoning off | 3 | 60.5% ± 2.1% | 0.40 ± 0.02 | 44.4% ± 9.6% | 0.38 ± 0.02 | $0.16 | 2.7 s |
+| Extractor + main model, reasoning off | 3 | 63.0% ± 6.4% | 0.37 ± 0.06 | 50.0% ± 0.0% | 0.41 ± 0.09 | $0.15 | 4.0 s |
+
+Range of the mean weighted error over the three runs: extractor version with reasoning
+on 0.41 to 0.52 (workflow 0.44 to 0.56), with reasoning off 0.30 to 0.41 (workflow 0.37
+to 0.41). The ranges overlap in both pairs.
+
+### The rule, fixed before the runs
+
+Decision D52 in PLAN.md, written down before any run of the new version: compared with
+the workflow row of the same reasoning setting, the sub-agent is **kept** if
+
+- (a) the mean weighted error is lower by more than the noise figure (0.077) and APPLY
+  recall is not lower, **or**
+- (b) the cost per 100 postings is at least 10% lower, the weighted error is not higher
+  by more than 0.077 and APPLY recall is not lower.
+
+Anything else is **drop**.
+
+| Pair | Weighted error | APPLY recall | Cost per 100 | (a) | (b) | Result |
+|---|---|---|---|---|---|---|
+| Reasoning on | 0.51 → 0.48 (−0.025) | 44.4% → 38.9% | $0.62 → $0.58 (−6.3%) | no | no | drop |
+| Reasoning off | 0.40 → 0.37 (−0.025) | 44.4% → 50.0% | $0.156 → $0.154 (−1.6%) | no | no | drop |
+
+**Decision: drop.** Both pairs move the weighted error by 0.025, a third of the noise
+figure. No control run was made (it was planned only after a win).
+
+### What the numbers say
+
+- **The facts were never the problem.** The hard rules fired on the same three postings
+  in every run of both versions: the on-site job in Bursa (location) and the junior and
+  intern postings (seniority). The cheaper extractor read those facts exactly as the
+  main model did. It also never caused a wrong SKIP: on no posting did a rule fire for
+  one version and not for the other.
+- **The expensive mistake is still there.** With reasoning on, the main model rated an
+  APPLY posting SKIP 3 times and a PREPARE posting SKIP 4 times in three runs (workflow:
+  5 and 3). Miny and the Getir senior AI posting are wrong in every run of both. Taking
+  the extraction away from the main model did not change how it weighs a single missing
+  skill, which is where that mistake is made (reading of the rationales, PLAN.md Phase 8
+  step 2).
+- **It is slightly cheaper, which was not expected.** Two calls cost less than one with
+  reasoning on, because the main model's shorter prompt and schema reduce its tokens
+  (about 52k in / 53k out per run against 60k / 60k), and that outweighs the extractor's
+  $0.03 per 100 postings. With reasoning off there is less to save and the cost is flat.
+- **It is slower.** One more call: +0.9 s per posting with reasoning on, +1.4 s (about
+  half as much again) with reasoning off.
+- **It is less stable with reasoning on.** 9 of 27 predictions changed between its three
+  runs against 5 for the workflow; its accuracy ranged from 59.3% to 70.4%.
+- **Skipping the main call when a rule already decides** would be the one real saving of
+  having the facts first. It was not built, only computed from the run files: the main
+  model's calls on the three rule-decided postings are 11% to 13% of a run's cost with
+  reasoning on. Cost per 100 postings would be about $0.52 (−17% against the workflow)
+  with reasoning on and $0.141 (−9.6%) with reasoning off, with no final decision
+  changed. That passes the cost bar of rule (b) in the first pair only, where APPLY
+  recall is lower, so the result is still drop. The saving also depends entirely on how
+  many postings a rule decides: 3 of 27 here.
+
+### How much to trust this
+
+- 27 postings, 6 of them APPLY: the difference in APPLY recall between the versions
+  (38.9% and 44.4%, or 50.0% and 44.4%) is a third of a posting per run. It decides
+  nothing by itself; it only fails to support a keep.
+- The comparison is not a clean single-variable test: the main model's prompt and its
+  output schema both shrink when the extraction moves out. With a result inside the
+  noise there is nothing to attribute, so the control run was not needed.
+- The workflow rows were measured about two hours earlier on the same day; same set,
+  same prompt hash, same model ids.
+- The extractor's facts were compared with the main model's only through the rules that
+  fired. Run files do not store the extracted fields, so company, role and English risk
+  were not compared field by field.
+
+### Keep or drop
+
+_Drafted by Claude from the numbers above; not yet confirmed by the candidate._
+
+Drop. The sub-agent does not improve the weighted error beyond the noise in either
+pair, and it does not reach the cost bar either. It answers a question the errors never
+asked: the model already reads location, work mode and seniority correctly, and the
+mistake that costs most, a good job rated SKIP, is made in the judgment about one
+missing skill, not in the facts. The extractor version stays in the repository as a
+measured version, like the agent, and is not offered on the page (D53). What it showed
+is still useful for later phases: a call that only reads the posting needs no CV, so
+Phase 10's `extract` step can be this one if a batch ever makes skipping rule-decided
+postings worth a second call.

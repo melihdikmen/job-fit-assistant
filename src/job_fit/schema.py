@@ -63,6 +63,34 @@ class RationaleScore(BaseModel):
     )
 
 
+# One wording per field, shared by every model that carries the field, so that the
+# single-call schema (``JobDecision``) and the two-call schemas (``PostingFacts`` and
+# ``FitDecision``) cannot drift apart.
+RATIONALE_DESCRIPTION = (
+    "Think first: 3 to 5 sentences comparing the posting's requirements with the "
+    "candidate's CV. Written in English."
+)
+COMPANY_DESCRIPTION = "Hiring company name as written in the posting, or 'unknown' if not stated."
+ROLE_DESCRIPTION = "Job title as written in the posting, or 'unknown' if not stated."
+LOCATION_DESCRIPTION = (
+    "Where the job is done. On-site or hybrid: 'City, Country' (e.g. 'Istanbul, "
+    "Türkiye'). Remote: 'Remote (<region the role is open to>)' (e.g. 'Remote "
+    "(Türkiye)', 'Remote (Worldwide)', 'Remote (US only)'). Use 'unknown' if the "
+    "posting does not say. Never guess."
+)
+WORK_MODE_DESCRIPTION = "Working arrangement stated in the posting; 'unknown' if not stated."
+ENGLISH_RISK_DESCRIPTION = (
+    "True if the posting requires fluent or advanced English, or the team works in English."
+)
+SENIORITY_DESCRIPTION = "Seniority level the posting targets; 'unknown' if it cannot be told."
+MATCHING_SKILLS_DESCRIPTION = "Requirements from the posting that the CV clearly covers."
+MISSING_SKILLS_DESCRIPTION = "Requirements from the posting that the CV does not cover."
+DECISION_DESCRIPTION = (
+    "APPLY: good fit, apply now. PREPARE: mostly a fit with 1 or 2 gaps that a "
+    "short preparation can close. SKIP: not a fit."
+)
+
+
 class JobDecision(BaseModel):
     """Structured decision about one job posting for one candidate.
 
@@ -71,46 +99,54 @@ class JobDecision(BaseModel):
     and ``decision`` comes last so it can rely on everything extracted above it.
     """
 
-    rationale: str = Field(
-        description=(
-            "Think first: 3 to 5 sentences comparing the posting's requirements with the "
-            "candidate's CV. Written in English."
-        )
-    )
-    company: str = Field(
-        description="Hiring company name as written in the posting, or 'unknown' if not stated."
-    )
-    role: str = Field(
-        description="Job title as written in the posting, or 'unknown' if not stated."
-    )
-    location: str = Field(
-        description=(
-            "Where the job is done. On-site or hybrid: 'City, Country' (e.g. 'Istanbul, "
-            "Türkiye'). Remote: 'Remote (<region the role is open to>)' (e.g. 'Remote "
-            "(Türkiye)', 'Remote (Worldwide)', 'Remote (US only)'). Use 'unknown' if the "
-            "posting does not say. Never guess."
-        )
-    )
-    work_mode: WorkMode = Field(
-        description="Working arrangement stated in the posting; 'unknown' if not stated."
-    )
-    english_risk: bool = Field(
-        description=(
-            "True if the posting requires fluent or advanced English, or the team works in English."
-        )
-    )
-    seniority: Seniority = Field(
-        description="Seniority level the posting targets; 'unknown' if it cannot be told."
-    )
-    matching_skills: list[str] = Field(
-        description="Requirements from the posting that the CV clearly covers."
-    )
-    missing_skills: list[str] = Field(
-        description="Requirements from the posting that the CV does not cover."
-    )
-    decision: DecisionLabel = Field(
-        description=(
-            "APPLY: good fit, apply now. PREPARE: mostly a fit with 1 or 2 gaps that a "
-            "short preparation can close. SKIP: not a fit."
-        )
-    )
+    rationale: str = Field(description=RATIONALE_DESCRIPTION)
+    company: str = Field(description=COMPANY_DESCRIPTION)
+    role: str = Field(description=ROLE_DESCRIPTION)
+    location: str = Field(description=LOCATION_DESCRIPTION)
+    work_mode: WorkMode = Field(description=WORK_MODE_DESCRIPTION)
+    english_risk: bool = Field(description=ENGLISH_RISK_DESCRIPTION)
+    seniority: Seniority = Field(description=SENIORITY_DESCRIPTION)
+    matching_skills: list[str] = Field(description=MATCHING_SKILLS_DESCRIPTION)
+    missing_skills: list[str] = Field(description=MISSING_SKILLS_DESCRIPTION)
+    decision: DecisionLabel = Field(description=DECISION_DESCRIPTION)
+
+
+class PostingFacts(BaseModel):
+    """Facts stated in a job posting, extracted without looking at the candidate.
+
+    The extraction sub-agent returns this. It holds the fields of ``JobDecision`` that
+    need no judgment about the fit, in the same order and with the same descriptions.
+    """
+
+    company: str = Field(description=COMPANY_DESCRIPTION)
+    role: str = Field(description=ROLE_DESCRIPTION)
+    location: str = Field(description=LOCATION_DESCRIPTION)
+    work_mode: WorkMode = Field(description=WORK_MODE_DESCRIPTION)
+    english_risk: bool = Field(description=ENGLISH_RISK_DESCRIPTION)
+    seniority: Seniority = Field(description=SENIORITY_DESCRIPTION)
+
+
+class FitDecision(BaseModel):
+    """The judgment about the fit: what the main model returns when a sub-agent extracts.
+
+    It holds the remaining fields of ``JobDecision``. ``rationale`` still comes first
+    and ``decision`` last, for the reason given there.
+    """
+
+    rationale: str = Field(description=RATIONALE_DESCRIPTION)
+    matching_skills: list[str] = Field(description=MATCHING_SKILLS_DESCRIPTION)
+    missing_skills: list[str] = Field(description=MISSING_SKILLS_DESCRIPTION)
+    decision: DecisionLabel = Field(description=DECISION_DESCRIPTION)
+
+
+def join_decision(facts: PostingFacts, fit: FitDecision) -> JobDecision:
+    """Combine extracted facts and a fit judgment into one decision.
+
+    Args:
+        facts: Facts extracted from the posting.
+        fit: The main model's judgment about the fit.
+
+    Returns:
+        A ``JobDecision`` with every field taken from one of the two parts.
+    """
+    return JobDecision(**facts.model_dump(), **fit.model_dump())

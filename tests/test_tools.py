@@ -5,16 +5,17 @@ from typing import Any
 import pytest
 from langchain_core.tools import BaseTool
 
+from job_fit.rules import FX_RATES_CHECKED_ON, FX_RATES_TO_TRY
 from job_fit.tools import (
-    FX_RATES_CHECKED_ON,
-    FX_RATES_TO_TRY,
     build_tools,
     find_cv_section,
     rule_check,
     split_cv_sections,
-    to_try,
     tool_descriptions,
 )
+
+ENGLISH_POSTING = "Fluent English is required; the team works across Europe."
+NEUTRAL_POSTING = "We build mobile apps with React Native."
 
 CV = """\
 # Jane Doe
@@ -34,14 +35,20 @@ TypeScript, React Native
 """
 
 
-def _tool(name: str, cv: str = CV) -> BaseTool:
-    """Return one of the tools built for a CV, by name."""
-    return next(item for item in build_tools(cv) if item.name == name)
+def _tool(name: str, cv: str = CV, posting_text: str = "") -> BaseTool:
+    """Return one of the tools built for a CV and a posting, by name."""
+    return next(item for item in build_tools(cv, posting_text) if item.name == name)
 
 
-def _check(location: str, work_mode: str, seniority: str, english: bool = False) -> dict[str, Any]:
+def _check(
+    location: str,
+    work_mode: str,
+    seniority: str,
+    english: bool = False,
+    posting_text: str = "",
+) -> dict[str, Any]:
     """Call the check_rules tool the way the agent does."""
-    return _tool("check_rules").invoke(
+    return _tool("check_rules", posting_text=posting_text).invoke(
         {
             "location": location,
             "work_mode": work_mode,
@@ -91,6 +98,26 @@ def test_check_rules_english_requirement_is_a_flag_not_a_skip() -> None:
 
     assert answer["english_risk"] is True
     assert answer["forced_decision"] is None
+
+
+def test_check_rules_raises_the_english_flag_from_the_posting_text() -> None:
+    """A posting that demands fluent English is flagged even if the model said no."""
+    answer = _check("Istanbul, Türkiye", "hybrid", "senior", posting_text=ENGLISH_POSTING)
+
+    assert answer["english_risk"] is True
+    assert answer["forced_decision"] is None
+
+
+def test_check_rules_leaves_the_english_flag_down_for_a_neutral_posting() -> None:
+    """Without a keyword match and without the model's flag there is no English risk."""
+    answer = _check("Istanbul, Türkiye", "hybrid", "senior", posting_text=NEUTRAL_POSTING)
+
+    assert answer["english_risk"] is False
+
+
+def test_the_posting_text_does_not_change_what_the_model_is_told() -> None:
+    """Tool descriptions, and so the agent's prompt hash, do not depend on the posting."""
+    assert tool_descriptions(build_tools(CV, ENGLISH_POSTING)) == tool_descriptions(build_tools(CV))
 
 
 def test_rule_check_accepts_values_in_any_letter_case() -> None:
@@ -155,24 +182,6 @@ def test_get_cv_section_description_names_the_topics_of_this_cv() -> None:
     description = _tool("get_cv_section").description
 
     assert "experience, projects, skills" in description
-
-
-@pytest.mark.parametrize(("currency", "code"), [("USD", "USD"), ("eur", "EUR"), (" usd ", "USD")])
-def test_to_try_converts_at_the_fixed_rate(currency: str, code: str) -> None:
-    """USD and EUR are converted with the rate from the constant table."""
-    assert to_try(1000, currency) == round(1000 * FX_RATES_TO_TRY[code], 2)
-
-
-def test_to_try_rejects_an_unsupported_currency() -> None:
-    """A currency without a fixed rate is an error that names the supported ones."""
-    with pytest.raises(ValueError, match="Unsupported currency 'GBP'. Supported: USD, EUR"):
-        to_try(100, "GBP")
-
-
-def test_to_try_rejects_a_negative_amount() -> None:
-    """A negative salary is rejected."""
-    with pytest.raises(ValueError, match="negative"):
-        to_try(-1, "USD")
 
 
 def test_convert_currency_tool_returns_the_amount_in_try() -> None:

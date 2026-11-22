@@ -24,8 +24,9 @@ from job_fit.eval import (
 from job_fit.judge import CRITERIA
 from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, LLMResponse
 from job_fit.metrics import spread
+from job_fit.pricing import call_cost_usd
 from job_fit.schema import JobDecision
-from job_fit.workflow import DecisionError, DecisionResult, ToolCallRecord
+from job_fit.workflow import DecisionError, DecisionResult, ModelCall, ToolCallRecord
 
 MODEL = "gemini-2.5-flash"
 CV = "CV-MARKER seven years of React Native."
@@ -960,3 +961,168 @@ def test_main_refuses_a_judge_that_is_the_judged_model(
 
     assert exit_code == 1
     assert "its own output" in capsys.readouterr().err
+
+
+EXTRACTOR_MODEL = "gemini-3.1-flash-lite"
+EXTRACTOR_TOKENS = (400, 60)
+
+
+def _extractor_result(decision: str, llm_decision: str | None = None) -> DecisionResult:
+    """Build a result of the extractor version: main-model usage plus one sub-agent call."""
+    return replace(
+        _decision_result(decision, llm_decision),
+        attempts=2,
+        extra_calls=(
+            ModelCall(
+                model=EXTRACTOR_MODEL,
+                input_tokens=EXTRACTOR_TOKENS[0],
+                output_tokens=EXTRACTOR_TOKENS[1],
+                latency_s=0.5,
+            ),
+        ),
+    )
+
+
+def _extractor_report(fake: FakeDecide, labels: list[str], extractor: str = EXTRACTOR_MODEL) -> Any:
+    """Evaluate one posting per label with a fake extractor version and build its report."""
+    postings = [_posting(f"p-{index}", label) for index, label in enumerate(labels)]
+    results = evaluate(postings, CV, model=MODEL, decide_fn=fake)
+    return build_report(
+        results,
+        model=MODEL,
+        provider="vertex",
+        started_at=STARTED_AT,
+        dataset_path=Path("data/postings.jsonl"),
+        dataset_sha256="abc",
+        coverage_problems=[],
+        version="extractor",
+        prompt_sha256="extractor-prompt",
+        extractor_model=extractor,
+    )
+
+
+class FakeExtractorDecide(FakeDecide):
+    """A fake of ``decide_with_extractor``: it also takes the sub-agent's model."""
+
+    def __call__(self, posting_text: str, cv: str, *, extractor_model: str, **options: Any) -> Any:
+        """Record the sub-agent's model, then behave like the fake workflow."""
+        self.extractor_models = [*getattr(self, "extractor_models", []), extractor_model]
+        return super().__call__(posting_text, cv, **options)
+
+
+def test_extractor_report_prices_each_model_at_its_own_rate() -> None:
+    """The run's cost is the main model's tokens plus the sub-agent's, each at its price."""
+    fake = FakeDecide(_extractor_result("APPLY"), _extractor_result("SKIP"))
+
+    report = _extractor_report(fake, ["APPLY", "SKIP"])
+
+    main_cost = call_cost_usd("vertex", MODEL, 2000, 400)
+    extractor_cost = call_cost_usd(
+        "vertex", EXTRACTOR_MODEL, 2 * EXTRACTOR_TOKENS[0], 2 * EXTRACTOR_TOKENS[1]
+    )
+    usage = report.extra_usage[EXTRACTOR_MODEL]
+    assert (report.input_tokens, report.output_tokens) == (2000, 400)
+    assert (usage.input_tokens, usage.output_tokens) == (800, 120)
+    assert usage.cost_usd == pytest.approx(extractor_cost)
+    assert report.cost_usd == pytest.approx(main_cost + extractor_cost)
+    assert report.cost_usd > main_cost
+    assert report.cost_per_100_usd == pytest.approx(report.cost_usd * 50)
+    assert report.mean_model_calls == 2.0
+    assert report.extractor_model == EXTRACTOR_MODEL
+
+
+def test_unknown_sub_agent_price_makes_the_whole_cost_unknown() -> None:
+    """A partial sum is never shown as the cost of a run."""
+    unpriced = replace(
+        _extractor_result("APPLY"),
+        extra_calls=(
+            ModelCall(model="mystery-extractor", input_tokens=1, output_tokens=1, latency_s=0.1),
+        ),
+    )
+
+    report = _extractor_report(FakeDecide(unpriced), ["APPLY"], extractor="mystery-extractor")
+
+    assert report.extra_usage["mystery-extractor"].cost_usd is None
+    assert report.cost_usd is None
+    assert report.cost_per_100_usd is None
+
+
+def test_extractor_report_counts_what_skipping_rule_decided_postings_would_save() -> None:
+    """Main-model calls on postings a rule decided are the cost a skip would save."""
+    fake = FakeDecide(
+        _extractor_result("APPLY"),
+        _extractor_result("SKIP", llm_decision="APPLY"),
+        _extractor_result("SKIP"),
+    )
+
+    report = _extractor_report(fake, ["APPLY", "SKIP", "SKIP"])
+
+    assert report.rules_fired_postings == 1
+    assert report.skippable_cost_usd == pytest.approx(call_cost_usd("vertex", MODEL, 1000, 200))
+
+
+def test_workflow_report_has_no_sub_agent_usage() -> None:
+    """A single-model run has nothing to add to its own tokens."""
+    report = _report([_posting("a", "APPLY")], FakeDecide(_decision_result("APPLY")))
+
+    assert report.extra_usage == {}
+    assert report.extractor_model is None
+    assert report.cost_usd == pytest.approx(call_cost_usd("vertex", MODEL, 1000, 200))
+
+
+def test_formatted_extractor_report_shows_the_sub_agent_and_the_rule_saving() -> None:
+    """The extractor block appears only for extractor runs."""
+    fake = FakeDecide(_extractor_result("APPLY"), _extractor_result("SKIP", llm_decision="APPLY"))
+    extractor_text = format_report(_extractor_report(fake, ["APPLY", "SKIP"]))
+    workflow_text = format_report(
+        _report([_posting("a", "APPLY")], FakeDecide(_decision_result("APPLY")))
+    )
+
+    assert f"(extractor {EXTRACTOR_MODEL}, vertex, reasoning default)" in extractor_text
+    assert f"sub-agent: {EXTRACTOR_MODEL}: 800 input, 120 output tokens" in extractor_text
+    assert "rules:    fired on 1 of 2 postings" in extractor_text
+    assert "sub-agent:" not in workflow_text
+
+
+def test_save_report_names_an_extractor_run_after_its_sub_agent(tmp_path: Path) -> None:
+    """Runs with different sub-agent models get different file names."""
+    report = _extractor_report(FakeDecide(_extractor_result("APPLY")), ["APPLY"])
+
+    path = save_report(report, tmp_path, STARTED_AT)
+
+    assert path.name == f"2026-11-10_153005_{MODEL}_extractor-{EXTRACTOR_MODEL}.json"
+
+
+def test_main_version_extractor_binds_the_sub_agent_and_hashes_both_prompts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--version extractor`` passes ``--extractor-model`` on and records the version's hash."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS)
+    argv += ["--version", "extractor", "--extractor-model", "another-extractor"]
+    fake = FakeExtractorDecide(*[_extractor_result(label) for label in COMPLETE_LABELS])
+    monkeypatch.setitem(eval_module.DECIDE_FUNCTIONS, "extractor", fake)
+
+    exit_code = main(argv, clock=lambda: STARTED_AT)
+
+    run_file = tmp_path / "results" / f"2026-11-10_153005_{MODEL}_extractor-another-extractor.json"
+    saved = json.loads(run_file.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert set(fake.extractor_models) == {"another-extractor"}
+    assert saved["version"] == "extractor"
+    assert saved["extractor_model"] == "another-extractor"
+    assert saved["prompt_sha256"] == eval_module.extractor_prompt_sha256()
+    assert saved["prompt_sha256"] != eval_module.workflow_prompt_sha256()
+    assert saved["experiment"] == f"extractor-another-extractor_{MODEL}_reasoning-default"
+    assert saved["results"][0]["extra_calls"][0]["model"] == EXTRACTOR_MODEL
+
+
+def test_workflow_run_does_not_record_an_extractor_model(tmp_path: Path) -> None:
+    """The option's default does not leak into runs of other versions."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS)
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+
+    main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    saved = json.loads(next((tmp_path / "results").iterdir()).read_text(encoding="utf-8"))
+    assert saved["extractor_model"] is None
+    assert saved["experiment"] == f"workflow_{MODEL}_reasoning-default"

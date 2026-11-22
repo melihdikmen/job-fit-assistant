@@ -1,8 +1,9 @@
-"""Evaluate the workflow or the agent against the labeled dev set.
+"""Evaluate the workflow, the agent or the extractor version against the labeled dev set.
 
 Run it with::
 
-    uv run python -m job_fit.eval --model <model-id> [--version agent] [--runs 3] [--judge]
+    uv run python -m job_fit.eval --model <model-id> [--version agent|extractor] [--runs 3]
+        [--judge]
 
 It prints accuracy, the confusion matrix, precision and recall per class, Cohen's
 kappa, the weighted error under three cost matrices, the baselines, tokens, estimated
@@ -22,6 +23,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -38,6 +40,11 @@ from job_fit.dataset import (
     check_coverage,
     label_counts,
     load_postings,
+)
+from job_fit.extract import (
+    DEFAULT_EXTRACTOR_MODEL,
+    decide_with_extractor,
+    extractor_prompt_fingerprint,
 )
 from job_fit.judge import (
     DEFAULT_JUDGE_MODEL,
@@ -70,6 +77,7 @@ from job_fit.workflow import (
     USER_PROMPT_TEMPLATE,
     DecideFn,
     DecisionError,
+    ModelCall,
     ReasoningSetting,
     ToolCallRecord,
     add_llm_arguments,
@@ -77,7 +85,7 @@ from job_fit.workflow import (
     reasoning_flag,
 )
 
-Version = Literal["workflow", "agent"]
+Version = Literal["workflow", "agent", "extractor"]
 ProgressFn = Callable[[int, int, "PostingResult"], None]
 Clock = Callable[[], datetime]
 SleepFn = Callable[[float], None]
@@ -86,7 +94,12 @@ LLMCall = Callable[..., LLMResponse]
 VERSIONS: tuple[Version, ...] = get_args(Version)
 DEFAULT_VERSION: Version = "workflow"
 AGENT_VERSION: Version = "agent"
-DECIDE_FUNCTIONS: dict[Version, DecideFn] = {"workflow": decide, "agent": decide_with_agent}
+EXTRACTOR_VERSION: Version = "extractor"
+DECIDE_FUNCTIONS: dict[Version, DecideFn] = {
+    "workflow": decide,
+    "agent": decide_with_agent,
+    "extractor": decide_with_extractor,
+}
 CHECK_RULES_TOOL_NAME = "check_rules"
 
 DEFAULT_RESULTS_DIR = Path("data/results")
@@ -127,6 +140,8 @@ class PostingResult(BaseModel):
         latency_s: Seconds spent in LLM calls; 0 if the call failed.
         attempts: Number of LLM calls made; 0 if the call failed.
         tool_calls: Tool calls the agent made, in order; empty for the workflow.
+        extra_calls: Usage of calls to a model other than the deciding one (the
+            extraction sub-agent); not included in the token counts above.
         rationale: The model's rationale, with rule notes appended.
         error: Why the call failed; empty on success.
     """
@@ -144,6 +159,7 @@ class PostingResult(BaseModel):
     latency_s: float = 0.0
     attempts: int = 0
     tool_calls: tuple[ToolCallRecord, ...] = ()
+    extra_calls: tuple[ModelCall, ...] = ()
     rationale: str = ""
     error: str = ""
 
@@ -162,13 +178,29 @@ class Baseline(BaseModel):
     scores: Scores
 
 
+class ModelUsage(BaseModel):
+    """Tokens a run spent on a model other than the deciding one, and what they cost.
+
+    Attributes:
+        input_tokens: Prompt tokens, summed over the run.
+        output_tokens: Generated tokens, summed over the run.
+        cost_usd: List-price cost of these tokens; None if the price is unknown.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None
+
+
 class EvalReport(BaseModel):
     """Everything measured in one eval run; this is what gets saved.
 
     Attributes:
         model: Model id.
         provider: LLM provider.
-        version: What made the decisions: the fixed "workflow" or the "agent".
+        version: What made the decisions: the fixed "workflow", the "agent" or the
+            "extractor" version (a sub-agent extracts the facts, the model decides).
+        extractor_model: Model id of the extraction sub-agent; None for other versions.
         reasoning: Reasoning setting of the run: "on", "off" or the model's "default".
         location: Vertex AI location the calls went to; None for other providers.
         experiment: Name the run and its traces are tagged with.
@@ -188,11 +220,13 @@ class EvalReport(BaseModel):
         beats_baseline_accuracy: True if accuracy is above the majority baseline's.
         beats_baseline_weighted_error: True if the mean weighted error is below the
             majority baseline's.
-        input_tokens: Prompt tokens, summed over the run.
-        output_tokens: Generated tokens, summed over the run.
-        price: List price used, or None if the model is not in the price table.
+        input_tokens: Prompt tokens of the deciding model, summed over the run.
+        output_tokens: Generated tokens of the deciding model, summed over the run.
+        extra_usage: Tokens and cost of every other model the run called, by model id.
+        price: List price of the deciding model, or None if it is not in the price table.
         prices_checked_on: Date the price table was last checked.
-        cost_usd: Estimated cost of the run; None if the price is unknown.
+        cost_usd: Estimated cost of the run, all models included; None if a price is
+            unknown.
         cost_per_100_usd: Estimated cost per 100 postings; None if the price is unknown.
         mean_latency_s: Mean seconds per answered posting.
         mean_model_calls: Mean model calls per answered posting; None in run files
@@ -202,6 +236,10 @@ class EvalReport(BaseModel):
         check_rules_called: Postings for which the agent called ``check_rules``.
         check_rules_agreed: Of those, postings where the tool's answer for the agent's
             last call equals the rules that fired in code on the final output.
+        rules_fired_postings: Postings on which a hard rule forced the decision.
+        skippable_cost_usd: Cost of the deciding model's calls on those postings; None
+            if its price is unknown. With the facts extracted by a separate call, code
+            could skip these calls without changing a single final decision.
         results: One record per posting, in test set order.
     """
 
@@ -209,6 +247,7 @@ class EvalReport(BaseModel):
     provider: str
     # Defaults keep run files written before these fields existed loadable.
     version: Version = DEFAULT_VERSION
+    extractor_model: str | None = None
     reasoning: ReasoningSetting = DEFAULT_REASONING
     location: str | None = None
     experiment: str = ""
@@ -228,6 +267,7 @@ class EvalReport(BaseModel):
     beats_baseline_weighted_error: bool
     input_tokens: int
     output_tokens: int
+    extra_usage: dict[str, ModelUsage] = {}
     price: ModelPrice | None
     prices_checked_on: str
     cost_usd: float | None
@@ -238,6 +278,8 @@ class EvalReport(BaseModel):
     tool_call_counts: dict[str, int] = {}
     check_rules_called: int = 0
     check_rules_agreed: int = 0
+    rules_fired_postings: int = 0
+    skippable_cost_usd: float | None = None
     results: list[PostingResult]
 
 
@@ -248,7 +290,8 @@ class RunSummary(BaseModel):
         experiment: Name the runs are tagged with.
         model: Model id.
         provider: LLM provider.
-        version: "workflow" or "agent".
+        version: "workflow", "agent" or "extractor".
+        extractor_model: Model id of the extraction sub-agent; None for other versions.
         reasoning: Reasoning setting of the runs.
         dataset_sha256: Hash of the test set file all runs used.
         prompt_sha256: Hash of the prompts all runs used.
@@ -262,6 +305,7 @@ class RunSummary(BaseModel):
     model: str
     provider: str
     version: Version
+    extractor_model: str | None = None
     reasoning: ReasoningSetting
     dataset_sha256: str
     prompt_sha256: str
@@ -320,6 +364,7 @@ def _evaluate_one(
         latency_s=result.latency_s,
         attempts=result.attempts,
         tool_calls=result.tool_calls,
+        extra_calls=result.extra_calls,
         rationale=result.decision.rationale,
     )
 
@@ -470,6 +515,40 @@ def agent_prompt_sha256(cv: str) -> str:
     return sha256_text(agent_prompt_fingerprint(cv) + schema_fingerprint())
 
 
+def extractor_prompt_sha256() -> str:
+    """Hash every text that steers the extractor version's two models.
+
+    Returns:
+        SHA-256 of both prompts, the retry note and both output schemas.
+    """
+    return sha256_text(extractor_prompt_fingerprint())
+
+
+def _extra_usage(results: Sequence[PostingResult], provider: str) -> dict[str, ModelUsage]:
+    """Sum the tokens a run spent on models other than the deciding one.
+
+    Args:
+        results: One result per posting.
+        provider: LLM provider, for the price lookup.
+
+    Returns:
+        Tokens and list-price cost per model id, in order of first use.
+    """
+    tokens: dict[str, tuple[int, int]] = {}
+    for result in results:
+        for call in result.extra_calls:
+            used_input, used_output = tokens.get(call.model, (0, 0))
+            tokens[call.model] = (used_input + call.input_tokens, used_output + call.output_tokens)
+    return {
+        name: ModelUsage(
+            input_tokens=used_input,
+            output_tokens=used_output,
+            cost_usd=call_cost_usd(provider, name, used_input, used_output),
+        )
+        for name, (used_input, used_output) in tokens.items()
+    }
+
+
 def _check_rules_agreement(results: Sequence[PostingResult]) -> tuple[int, int]:
     """Compare what ``check_rules`` told the agent with the rules applied in code.
 
@@ -518,6 +597,7 @@ def build_report(
     experiment: str = "",
     run_index: int = 1,
     cv_sha256: str = "",
+    extractor_model: str | None = None,
 ) -> EvalReport:
     """Compute all metrics for a finished run.
 
@@ -536,6 +616,7 @@ def build_report(
         experiment: Name the run is tagged with.
         run_index: Number of the run within a repeated configuration.
         cv_sha256: Hash of the CV the run used.
+        extractor_model: Model id of the extraction sub-agent, if the version has one.
 
     Returns:
         The report to print and save.
@@ -558,7 +639,20 @@ def build_report(
 
     input_tokens = sum(result.input_tokens for result in results)
     output_tokens = sum(result.output_tokens for result in results)
-    cost_usd = call_cost_usd(provider, model, input_tokens, output_tokens)
+    extra_usage = _extra_usage(results, provider)
+    # One unknown price makes the total unknown: a partial sum would look like a cost.
+    costs = [
+        call_cost_usd(provider, model, input_tokens, output_tokens),
+        *(usage.cost_usd for usage in extra_usage.values()),
+    ]
+    cost_usd = None if any(cost is None for cost in costs) else sum(costs)
+    rule_decided = [result for result in results if result.fired_rules]
+    skippable_cost_usd = call_cost_usd(
+        provider,
+        model,
+        sum(result.input_tokens for result in rule_decided),
+        sum(result.output_tokens for result in rule_decided),
+    )
     answered = [result for result in results if result.predicted is not None]
     mean_latency_s = (
         sum(result.latency_s for result in answered) / len(answered) if answered else 0.0
@@ -576,6 +670,7 @@ def build_report(
         model=model,
         provider=provider,
         version=version,
+        extractor_model=extractor_model,
         reasoning=reasoning,
         location=location,
         experiment=experiment,
@@ -597,6 +692,7 @@ def build_report(
         ),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        extra_usage=extra_usage,
         price=price_for(provider, model),
         prices_checked_on=PRICES_CHECKED_ON,
         cost_usd=cost_usd,
@@ -607,6 +703,8 @@ def build_report(
         tool_call_counts=tool_call_counts,
         check_rules_called=check_rules_called,
         check_rules_agreed=check_rules_agreed,
+        rules_fired_postings=len(rule_decided),
+        skippable_cost_usd=skippable_cost_usd,
         results=list(results),
     )
 
@@ -688,6 +786,7 @@ def build_summary(
         model=first.model,
         provider=first.provider,
         version=first.version,
+        extractor_model=first.extractor_model,
         reasoning=first.reasoning,
         dataset_sha256=first.dataset_sha256,
         prompt_sha256=first.prompt_sha256,
@@ -709,8 +808,11 @@ def format_summary(summary: RunSummary) -> str:
         maximum, and the judge score if there is one.
     """
     runs = len(summary.run_files)
+    version = summary.version
+    if summary.extractor_model:
+        version += f" {summary.extractor_model}"
     lines = [
-        f"Summary of {runs} run(s): {summary.model} ({summary.version}, "
+        f"Summary of {runs} run(s): {summary.model} ({version}, "
         f"reasoning {summary.reasoning}), experiment '{summary.experiment}'",
         f"{'':<34}{'mean':>9}{'± stdev':>10}{'min':>9}{'max':>9}",
     ]
@@ -873,6 +975,8 @@ def _describe_route(report: EvalReport) -> str:
         "workflow, vertex, global, reasoning off".
     """
     parts = [report.version, report.provider]
+    if report.extractor_model:
+        parts[0] += f" {report.extractor_model}"
     if report.location:
         parts.append(report.location)
     parts.append(f"reasoning {report.reasoning}")
@@ -895,6 +999,33 @@ def _format_agent_usage(report: EvalReport) -> list[str]:
         f"rules:    check_rules called for {report.check_rules_called} postings; "
         f"its answer matched the rules applied in code for {report.check_rules_agreed}",
     ]
+
+
+def _format_extractor_usage(report: EvalReport) -> list[str]:
+    """Render what the sub-agent cost and what skipping rule-decided postings would save.
+
+    Args:
+        report: Report of an extractor run.
+
+    Returns:
+        One line per other model with its tokens and cost, and one line with the cost
+        of the deciding model's calls on postings a hard rule decided anyway.
+    """
+    lines = []
+    for name, usage in report.extra_usage.items():
+        cost = "price unknown" if usage.cost_usd is None else f"${usage.cost_usd:.4f}"
+        lines.append(
+            f"sub-agent: {name}: {usage.input_tokens} input, {usage.output_tokens} output "
+            f"tokens, {cost} (included in the cost above)"
+        )
+    if report.skippable_cost_usd is not None and report.cost_usd:
+        share = report.skippable_cost_usd / report.cost_usd
+        lines.append(
+            f"rules:    fired on {report.rules_fired_postings} of {report.dataset_size} "
+            f"postings; the main-model calls on those cost ${report.skippable_cost_usd:.4f} "
+            f"({share:.1%} of the run) and could be skipped without changing a decision"
+        )
+    return lines
 
 
 def format_report(report: EvalReport) -> str:
@@ -949,6 +1080,8 @@ def format_report(report: EvalReport) -> str:
     lines.append(f"latency:  {report.mean_latency_s:.2f} s mean per posting")
     if report.version == AGENT_VERSION:
         lines += _format_agent_usage(report)
+    if report.version == EXTRACTOR_VERSION:
+        lines += _format_extractor_usage(report)
 
     wrong = [result for result in report.results if result.predicted != result.label]
     lines += ["", f"Wrong decisions: {len(wrong)} of {report.dataset_size}"]
@@ -957,14 +1090,27 @@ def format_report(report: EvalReport) -> str:
     return "\n".join(lines)
 
 
+def _safe_file_part(model: str) -> str:
+    """Make a model id usable inside a file name.
+
+    Args:
+        model: Model id, which may contain "/" or ":".
+
+    Returns:
+        The id with every run of other characters replaced by "-".
+    """
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", model)
+
+
 def save_report(
     report: EvalReport, results_dir: Path, started_at: datetime, *, numbered: bool = False
 ) -> Path:
-    """Write a report to ``<date>_<time>_<model>[_agent][_reasoning-<setting>][_run-<n>].json``.
+    """Write a report to ``<date>_<time>_<model>[_<version>][_reasoning-<setting>][_run-<n>].json``.
 
     The time is part of the name so that a second run on the same day does not
-    overwrite the first. The agent version and a reasoning setting other than the
-    default are part of the name so that such runs are easy to tell apart.
+    overwrite the first. A version other than the workflow (for the extractor version
+    with the sub-agent's model, e.g. ``_extractor-<model>``) and a reasoning setting
+    other than the default are part of the name so that such runs are easy to tell apart.
 
     Args:
         report: Report to save.
@@ -975,8 +1121,10 @@ def save_report(
     Returns:
         The path of the file written.
     """
-    safe_model = re.sub(r"[^A-Za-z0-9._-]+", "-", report.model)
+    safe_model = _safe_file_part(report.model)
     suffix = "" if report.version == DEFAULT_VERSION else f"_{report.version}"
+    if report.extractor_model:
+        suffix += f"-{_safe_file_part(report.extractor_model)}"
     if report.reasoning != DEFAULT_REASONING:
         suffix += f"_reasoning-{report.reasoning}"
     if numbered:
@@ -1057,7 +1205,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--version",
         choices=VERSIONS,
         default=DEFAULT_VERSION,
-        help="What decides: the fixed workflow or the tool-calling agent.",
+        help="What decides: the fixed workflow, the tool-calling agent, or the main "
+        "model after an extraction sub-agent.",
+    )
+    parser.add_argument(
+        "--extractor-model",
+        default=DEFAULT_EXTRACTOR_MODEL,
+        help="Model id of the extraction sub-agent; used only with --version extractor.",
     )
     parser.add_argument("--data", type=Path, default=DEV_DATA_PATH, help="Test set (JSONL).")
     parser.add_argument("--cv", type=Path, default=DEFAULT_CV_PATH, help="Path to the CV.")
@@ -1154,7 +1308,14 @@ def run(
     if not cv.strip():
         raise ValueError(f"The CV file is empty: {args.cv}")
     selected = postings[: args.limit] if args.limit else postings
-    experiment = args.experiment or f"{args.version}_{args.model}_reasoning-{args.reasoning}"
+    extractor_model = args.extractor_model if args.version == EXTRACTOR_VERSION else None
+    version_name = f"{args.version}-{extractor_model}" if extractor_model else args.version
+    experiment = args.experiment or f"{version_name}_{args.model}_reasoning-{args.reasoning}"
+    prompt_hashes: dict[Version, Callable[[], str | None]] = {
+        DEFAULT_VERSION: lambda: None,
+        AGENT_VERSION: lambda: agent_prompt_sha256(cv),
+        EXTRACTOR_VERSION: extractor_prompt_sha256,
+    }
     counts = ", ".join(f"{label} {count}" for label, count in label_counts(selected).items())
 
     reports: list[EvalReport] = []
@@ -1163,7 +1324,7 @@ def run(
         started_at = clock()
         print(
             f"run {run_index} of {args.runs}: evaluating {len(selected)} postings ({counts}) "
-            f"with {args.model} ({args.version})",
+            f"with {args.model} ({version_name})",
             flush=True,
         )
         results = evaluate(
@@ -1191,10 +1352,11 @@ def run(
             reasoning=args.reasoning,
             location=vertex_location() if args.provider == VERTEX_PROVIDER else None,
             version=args.version,
-            prompt_sha256=agent_prompt_sha256(cv) if args.version == AGENT_VERSION else None,
+            prompt_sha256=prompt_hashes[args.version](),
             experiment=experiment,
             run_index=run_index,
             cv_sha256=sha256_text(cv),
+            extractor_model=extractor_model,
         )
         print()
         print(format_report(report))
@@ -1226,6 +1388,21 @@ def run(
     return paths
 
 
+def _decide_function(args: argparse.Namespace) -> DecideFn:
+    """Pick the function that decides, for the version asked for.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        The workflow, the agent, or the extractor version bound to its sub-agent's model.
+    """
+    decide_fn = DECIDE_FUNCTIONS[args.version]
+    if args.version == EXTRACTOR_VERSION:
+        return partial(decide_fn, extractor_model=args.extractor_model)
+    return decide_fn
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -1238,7 +1415,8 @@ def main(
     Args:
         argv: Arguments without the program name; None reads ``sys.argv``.
         decide_fn: Function with the signature of ``workflow.decide``. None picks the
-            workflow or the agent according to ``--version``; tests pass a fake.
+            workflow, the agent or the extractor version according to ``--version``;
+            tests pass a fake.
         clock: Returns the current time; tests pass a fixed one.
         judge_llm: Function with the signature of ``generate_json`` for the judge;
             tests pass a fake.
@@ -1252,7 +1430,7 @@ def main(
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
-        run(args, decide_fn or DECIDE_FUNCTIONS[args.version], clock, judge_llm)
+        run(args, decide_fn or _decide_function(args), clock, judge_llm)
     except (OSError, ValueError, EvalError, JudgeError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

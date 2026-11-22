@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from job_fit.schema import JobDecision
+from job_fit.schema import FitDecision, JobDecision, PostingFacts, join_decision
 
 
 def _valid_payload() -> dict[str, Any]:
@@ -80,3 +80,60 @@ def test_missing_field_is_rejected(field: str) -> None:
 
     with pytest.raises(ValidationError):
         JobDecision.model_validate(payload)
+
+
+def test_facts_and_fit_together_have_exactly_the_fields_of_a_decision() -> None:
+    """The two-call schemas split the single-call schema without a gap or an overlap."""
+    facts = set(PostingFacts.model_fields)
+    fit = set(FitDecision.model_fields)
+
+    assert facts & fit == set()
+    assert facts | fit == set(JobDecision.model_fields)
+
+
+@pytest.mark.parametrize("part", [PostingFacts, FitDecision])
+def test_split_schemas_describe_each_field_as_the_decision_does(part: type) -> None:
+    """A field means the same thing whichever model fills it."""
+    for name, field in part.model_fields.items():
+        assert field.description == JobDecision.model_fields[name].description
+        assert field.annotation == JobDecision.model_fields[name].annotation
+
+
+def test_fit_decision_reasons_first_and_decides_last() -> None:
+    """The main model still writes the rationale before it commits to a decision."""
+    names = list(FitDecision.model_fields)
+
+    assert (names[0], names[-1]) == ("rationale", "decision")
+
+
+def test_posting_facts_reject_an_unknown_work_mode() -> None:
+    """The extractor's answer is validated like the workflow's."""
+    with pytest.raises(ValidationError):
+        PostingFacts(
+            company="Acme",
+            role="Engineer",
+            location="unknown",
+            work_mode="from the moon",
+            english_risk=False,
+            seniority="senior",
+        )
+
+
+def test_join_decision_takes_every_field_from_one_of_the_two_parts() -> None:
+    """Joining facts and fit gives a complete decision."""
+    facts = PostingFacts(
+        company="Acme",
+        role="Engineer",
+        location="Remote (Türkiye)",
+        work_mode="remote",
+        english_risk=True,
+        seniority="senior",
+    )
+    fit = FitDecision(
+        rationale="Fits.", matching_skills=["Python"], missing_skills=[], decision="APPLY"
+    )
+
+    decision = join_decision(facts, fit)
+
+    assert decision.model_dump() == facts.model_dump() | fit.model_dump()
+    assert list(decision.model_dump()) == list(JobDecision.model_fields)

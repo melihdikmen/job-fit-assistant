@@ -7,13 +7,13 @@ in code and override the LLM. It measures accuracy, cost and latency on a labele
 
 ## Commands
 - Install: `uv sync` · Test: `uv run pytest` · Lint: `uv run ruff check .` · Format: `uv run ruff format .`
-- Eval (dev set): `uv run python -m job_fit.eval --model <model> [--version agent] [--runs 3] [--judge]` · Page: `uv run python -m job_fit.ui`
+- Eval (dev set): `uv run python -m job_fit.eval --model <model> [--version agent|extractor] [--runs 3] [--judge]` · Page: `uv run python -m job_fit.ui`
 - Hook: `.claude/settings.json` runs ruff and pytest after every edit of a `.py` file or `pyproject.toml`.
 
 ## Folders
-- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools, ui, judge, tracing)
+- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools, extract, ui, judge, tracing)
 - `data/cv.md` – candidate CV (git-ignored); `data/postings.jsonl` – labeled set, split into `postings_dev.jsonl` and `postings_heldout.jsonl`; `data/results/` – run outputs (git-ignored)
-- `tests/` – pytest suite; `docs/results.md` – result tables; `.claude/hooks/` – post-edit check
+- `tests/` – pytest suite; `docs/results.md` – result tables; `docs/architecture.md` – why each LLM call exists; `.claude/hooks/` – post-edit check
 
 ## Rules
 - Plan first: write the phase plan to `PLAN.md`, wait for approval, then code. One phase at a time; commit at the end as `phase-N: <short description>`.
@@ -37,4 +37,6 @@ Each line: what went wrong → the rule that prevents it.
 - Two eval runs were cut off by a quota → an aborted run is repeated or reported as "not run", never patched together.
 - One agent run scored 85.7%, the next 61.9% → run a configuration 3 times (`--runs 3`); a difference below the noise figure in `docs/results.md` is not an improvement.
 - The judge model gave the same score as the candidate on 4 of 10 rationales → check a judge against human scores first; an unchecked judge score decides nothing.
+- A tool's code changed while its description, and so the prompt hash, stayed the same → the hash covers what the model is told, not what a tool returns; replay the recorded tool calls through old and new code before reusing an old row.
+- A sub-agent was planned before the errors were read; the rationales then showed the mistake was in the judgment, not the facts → read the wrong decisions first, and write the keep/drop rule down before the run.
 - Tuning a prompt against the test set fits it and breaks comparability → no change to prompts, schema or tool descriptions without re-running every compared row.

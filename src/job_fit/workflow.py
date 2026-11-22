@@ -93,6 +93,44 @@ class ToolCallRecord(BaseModel):
     arguments: dict[str, Any]
 
 
+class ModelCall(BaseModel):
+    """Token usage of calls made to a model other than the one that decides.
+
+    A decision made by two models cannot be priced from one pair of token counts: each
+    model has its own price.
+
+    Attributes:
+        model: Model id as the provider names it.
+        input_tokens: Prompt tokens, summed over the attempts.
+        output_tokens: Generated tokens, summed over the attempts.
+        latency_s: Seconds spent in these calls.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_s: float
+
+
+@dataclass(frozen=True)
+class CallUsage:
+    """What one validated call cost, summed over its attempts.
+
+    Attributes:
+        input_tokens: Prompt tokens.
+        output_tokens: Generated tokens.
+        latency_s: Seconds spent in LLM calls.
+        attempts: Number of LLM calls made: 1, or 2 after a schema retry.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    latency_s: float
+    attempts: int
+
+
 @dataclass(frozen=True)
 class DecisionResult:
     """Final decision for one posting, with the cost of producing it.
@@ -102,12 +140,14 @@ class DecisionResult:
         llm_decision: What the LLM decided before the rules.
         fired_rules: Names of the rules that forced a SKIP.
         model: Model id that produced the decision.
-        input_tokens: Prompt tokens, summed over all attempts.
-        output_tokens: Generated tokens, summed over all attempts.
-        latency_s: Seconds spent in LLM calls, summed over all attempts.
-        attempts: Number of LLM calls made: 1, or 2 after a schema retry, for the
-            workflow; one per step for the agent.
+        input_tokens: Prompt tokens of that model, summed over all attempts.
+        output_tokens: Generated tokens of that model, summed over all attempts.
+        latency_s: Seconds spent in LLM calls, summed over all calls of all models.
+        attempts: Number of LLM calls made to any model: 1, or 2 after a schema retry,
+            for the workflow; one per step for the agent.
         tool_calls: Tool calls made, in order. Always empty for the workflow.
+        extra_calls: Usage of calls to other models (a sub-agent), which are not in
+            ``input_tokens`` and ``output_tokens``. Empty for the workflow and the agent.
     """
 
     decision: JobDecision
@@ -119,6 +159,7 @@ class DecisionResult:
     latency_s: float
     attempts: int
     tool_calls: tuple[ToolCallRecord, ...] = ()
+    extra_calls: tuple[ModelCall, ...] = ()
 
 
 def reasoning_flag(setting: ReasoningSetting) -> bool | None:
@@ -164,6 +205,74 @@ def _describe_problems(error: ValidationError) -> str:
     return "\n".join(lines)
 
 
+def call_validated[SchemaT: BaseModel](
+    call_llm: LLMCall,
+    provider: str,
+    model: str,
+    system: str,
+    base_prompt: str,
+    schema: type[SchemaT],
+    *,
+    reasoning: bool | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> tuple[SchemaT, CallUsage]:
+    """Ask a model for JSON, validate it against a schema and retry once if it is invalid.
+
+    Args:
+        call_llm: Function with the signature of ``generate_json``.
+        provider: "vertex", "openrouter" or "ollama".
+        model: Model id as the provider names it.
+        system: System prompt.
+        base_prompt: User prompt of the first attempt; the retry appends what was wrong.
+        schema: Pydantic model the answer must follow.
+        reasoning: True to enable model reasoning, False to disable it, None for the
+            model default.
+        timeout_s: Timeout for one HTTP request, in seconds.
+
+    Returns:
+        The validated answer and what the attempts cost.
+
+    Raises:
+        DecisionError: If the answer is still invalid after the retry.
+        LLMError: If the LLM call itself fails.
+    """
+    user_prompt = base_prompt
+    input_tokens = 0
+    output_tokens = 0
+    latency_s = 0.0
+    problems = ""
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        response = call_llm(
+            provider,
+            model,
+            system,
+            user_prompt,
+            schema,
+            reasoning=reasoning,
+            timeout_s=timeout_s,
+        )
+        input_tokens += response.input_tokens
+        output_tokens += response.output_tokens
+        latency_s += response.latency_s
+        try:
+            answer = schema.model_validate_json(response.text)
+        except ValidationError as err:
+            problems = _describe_problems(err)
+            user_prompt = base_prompt + RETRY_NOTE_TEMPLATE.format(problems=problems)
+            continue
+        return answer, CallUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_s=latency_s,
+            attempts=attempt,
+        )
+
+    raise DecisionError(
+        f"Model '{model}' returned invalid output {MAX_ATTEMPTS} times. Last problems:\n{problems}"
+    )
+
+
 def decide(
     posting_text: str,
     cv: str,
@@ -204,47 +313,26 @@ def decide(
     if not cv.strip():
         raise ValueError("The CV text is empty.")
 
-    call_llm = llm or generate_json
-    base_prompt = build_user_prompt(posting_text, cv)
-    user_prompt = base_prompt
-    input_tokens = 0
-    output_tokens = 0
-    latency_s = 0.0
-    problems = ""
-
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        response = call_llm(
-            provider,
-            model,
-            SYSTEM_PROMPT,
-            user_prompt,
-            JobDecision,
-            reasoning=reasoning,
-            timeout_s=timeout_s,
-        )
-        input_tokens += response.input_tokens
-        output_tokens += response.output_tokens
-        latency_s += response.latency_s
-        try:
-            llm_decision = JobDecision.model_validate_json(response.text)
-        except ValidationError as err:
-            problems = _describe_problems(err)
-            user_prompt = base_prompt + RETRY_NOTE_TEMPLATE.format(problems=problems)
-            continue
-        outcome = apply_rules(llm_decision, posting_text)
-        return DecisionResult(
-            decision=outcome.decision,
-            llm_decision=llm_decision.decision,
-            fired_rules=outcome.fired_rules,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            latency_s=latency_s,
-            attempts=attempt,
-        )
-
-    raise DecisionError(
-        f"Model '{model}' returned invalid output {MAX_ATTEMPTS} times. Last problems:\n{problems}"
+    llm_decision, usage = call_validated(
+        llm or generate_json,
+        provider,
+        model,
+        SYSTEM_PROMPT,
+        build_user_prompt(posting_text, cv),
+        JobDecision,
+        reasoning=reasoning,
+        timeout_s=timeout_s,
+    )
+    outcome = apply_rules(llm_decision, posting_text)
+    return DecisionResult(
+        decision=outcome.decision,
+        llm_decision=llm_decision.decision,
+        fired_rules=outcome.fired_rules,
+        model=model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        latency_s=usage.latency_s,
+        attempts=usage.attempts,
     )
 
 
@@ -255,12 +343,17 @@ def format_result(result: DecisionResult) -> str:
         result: Result returned by ``decide``.
 
     Returns:
-        The decision as indented JSON followed by rule, token and latency lines, and
-        the tool calls if there were any.
+        The decision as indented JSON followed by rule, token and latency lines, the
+        usage of other models and the tool calls if there were any.
     """
     fired = ", ".join(result.fired_rules) or "none"
     tool_lines = [f"tool calls:    {len(result.tool_calls)}"] if result.tool_calls else []
     tool_lines += [f"  {call.name}({call.arguments})" for call in result.tool_calls]
+    extra_lines = [
+        f"other model:   {call.model}: {call.input_tokens} input, "
+        f"{call.output_tokens} output tokens, {call.latency_s:.2f} s"
+        for call in result.extra_calls
+    ]
     return "\n".join(
         [
             result.decision.model_dump_json(indent=2),
@@ -273,6 +366,7 @@ def format_result(result: DecisionResult) -> str:
             f"output tokens: {result.output_tokens}",
             f"latency:       {result.latency_s:.2f} s",
             f"attempts:      {result.attempts}",
+            *extra_lines,
             *tool_lines,
         ]
     )

@@ -12,7 +12,7 @@
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
 | 7 – Evals & observability | ✅ | see `git log --grep phase-7` | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests; pushed to GitHub 2026-11-22. conclusion paragraph confirmed by the candidate (D48) |
-| 8 – Agent architecture | ⬜ | | roadmap only |
+| 8 – Agent architecture | 🟡 | see `git log --grep phase-8` | steps 1–12 done 2026-11-22; sub-agent **dropped** by the rule of D52 (weighted error 0.51 → 0.48 with reasoning on, 0.40 → 0.37 off; noise 0.077); 528 tests; open: the candidate confirms `docs/architecture.md` and the keep/drop paragraph, then the push |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
 | 11 – Self-improvement | ⬜ | | roadmap only |
@@ -197,6 +197,30 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   conclusions" in `docs/results.md` as drafted. The Week 1 choice does not hold up on the
   new set, but nothing is switched yet: Phases 8 and 11 first look for why the workflow
   with reasoning on rates good jobs as SKIP. The held-out set stays closed until then.
+
+- D49 (2026-11-22): the extraction sub-agent **replaces** the fact fields the main model
+  writes. The extractor returns `PostingFacts` (the six fact fields), the main model
+  returns a smaller `FitDecision` (rationale, matching and missing skills, decision),
+  and code joins them into the unchanged `JobDecision`.
+- D50 (2026-11-22): the APPLY / PREPARE / SKIP definitions stay in the prompts in
+  Phase 8. Weighing a skill gap is the judgment the LLM call exists for; rewording the
+  definitions is a prompt change for Phase 11's guarded cycles.
+- D51 (2026-11-22): `check_rules` answers the English flag as `apply_rules` computes it
+  (the model's flag or the keyword match). The agent's 3 reference runs are repeated
+  only if replaying the 81 recorded `check_rules` calls shows a different tool answer
+  on at least one.
+- D52 (2026-11-22): keep-or-drop rule for the sub-agent, fixed before any run. Compared
+  with the workflow row of the same main-model setting (3 runs each, same dev set).
+  **Keep** if mean weighted error is lower by more than the noise figure (0.077) and
+  APPLY recall is not lower; **or** cost per 100 postings is at least 10% lower with
+  weighted error not higher by more than 0.077 and APPLY recall not lower. Anything
+  else is **drop**. Two pairs are run (main model with reasoning on and off); the judge
+  score is not a criterion.
+- D53 (2026-11-22): kept, the sub-agent becomes a choice on the page and the `extract`
+  step of Phase 10; dropped, the module stays in the repo as a measured version, like
+  the agent (D27), but is offered nowhere.
+- The candidate accepted D49–D53 as proposed on 2026-11-22 and told Claude to go on;
+  Claude took that as approval of the Phase 8 plan.
 
 ## What the candidate does (Claude cannot)
 
@@ -1677,22 +1701,271 @@ LangGraph; parallel runs.
 
 ---
 
-## Phase 8 – Agent architecture (roadmap)
+## Phase 8 – Agent architecture (in progress)
 
 Source: [PROCESS.md §7 Phase 8](PROCESS.md#phase-8--agent-architecture-logic-in-code-sub-agents)
 
-- `docs/architecture.md`, one page: the business problem, the baseline, why each LLM
-  call exists, and which of the three traps the Week 1 agent fell into. Material is
-  already measured: it made the same three tool calls on all 42 decisions, and two of
-  its three tools changed nothing.
-- Audit the prompts for business logic. Known candidates: the APPLY / PREPARE / SKIP
-  definitions in the system prompt, and salary conversion, which has a tool but no
-  field in `JobDecision` to use it.
-- One experiment: a cheap model (`gemini-3.1-flash-lite`) extracts the facts, the main
-  model decides. Compared with the Phase 7 reference on the dev set, 3 runs each;
-  kept only if the gain is larger than the noise figure.
-- To decide at the start: whether the sub-agent replaces the fact fields of
-  `JobDecision` (a schema change, new reference runs) or only feeds them in.
+State at the start (checked 2026-11-22): working tree clean; 485 tests pass; the 12
+reference run files of Phase 7 are in `data/results/` (dev set SHA-256 `02f2239aa4ad…`);
+no `docs/architecture.md`; `eval` knows the versions `workflow` and `agent`; a
+`DecisionResult` carries one model id and one pair of token counts, so a decision made
+by two models cannot be priced yet.
+
+### Before coding (candidate)
+
+- [x] Answer D49–D53 (all decided as proposed, see Decided) and approve this plan.
+- [ ] Have the course's wording of the **three traps** at hand ("the agent for X",
+      human-like agents, plausible-looking output). Claude drafts `docs/architecture.md`
+      from the measured facts; the candidate checks that each trap is used as the course
+      means it and owns the text.
+- [ ] Budget alert in the Google Cloud console, still open from Phase 3.
+
+### What the audit already shows (read from the code, 2026-11-22)
+
+Step 3 writes the full table; these are the findings the plan is built on.
+
+| Where | What is there | Business logic? | Plan |
+|---|---|---|---|
+| `SYSTEM_PROMPT`, `AGENT_SYSTEM_PROMPT`, `decision` field description | APPLY / PREPARE / SKIP definitions, worded differently in the prompt and in the schema | Yes: the decision thresholds | Stays, documented (D50); the double wording is noted for Phase 11 |
+| `AGENT_SYSTEM_PROMPT` steps 2–4 | "Read experience and skills", "call check_rules once", "use convert_currency only if…" | Yes: a fixed order of steps written as prose | Not changed (the agent is kept for comparison only, D27); it is the main evidence in `docs/architecture.md` |
+| `tools.py` | `FX_RATES_TO_TRY`, `FX_RATES_CHECKED_ON`, `to_try` | Yes: business data and a rule-like function outside `rules.py` | Move to `rules.py`; the tool and its description stay byte-identical |
+| `tools.rule_check` | `english_risk` is the model's own argument handed back | The language rule (`has_english_risk`) is not behind a tool | D51 |
+| `convert_currency` | Called 4 to 6 times per run; no field in `JobDecision` and no rule uses the result | A tool without a consumer | Stays until Phase 9 decides on a salary floor; named in `docs/architecture.md` |
+| `location` field description | The `City, Country` / `Remote (<region>)` format | No: the contract between the model's output and `rules.py` | Stays |
+| "Restrictions … are enforced separately in code" | Tells the model what not to decide | No: it keeps logic out of the prompt | Stays |
+
+### Design of the sub-agent experiment
+
+| Question | Answer | Why |
+|---|---|---|
+| What is the one sub-agent? | An extractor on `gemini-3.1-flash-lite`: posting in, `PostingFacts` out (company, role, location, work mode, English risk, seniority). | It is the example PROCESS.md gives, and it is the part of the job that needs no judgment about the candidate. |
+| What does the extractor see? | The posting only. Not the CV. | The facts are in the posting; a call that does not need personal data should not get it. |
+| What does the main model do then? | Reads posting and CV and returns `FitDecision`: rationale, matching skills, missing skills, decision (D49). | One job per call. Its prompt is the workflow's prompt minus the extraction step, word for word otherwise, so the removed step is the only difference. |
+| Where do the hard rules run? | In code, on the extractor's facts, with the same `apply_rules` as today. `JobDecision`, the product's output, does not change. | Rules stay the last word; eval, judge and page keep working on the same type. |
+| Is the main call skipped when a rule already forces SKIP? | Not in the experiment. The saving is computed from the run files instead (tokens of the main call on every posting where a rule fired). | The final decision is the same either way, so the figure is exact; skipping would remove the "before rules" numbers. It is built only if the sub-agent is kept. |
+| Which rows are compared? | Extractor + `gemini-2.5-flash` reasoning on against the workflow with reasoning on (0.51 ± 0.06); the same with reasoning off against 0.40 ± 0.02. Three runs each, dev set. | The Phase 7 rows are from the same day, dataset and workflow prompt, so they are the reference as they stand. |
+| What if it wins? | One control: 3 runs with `gemini-2.5-flash` as the extractor. | It tells whether the gain comes from splitting the work or from the cheaper model; without it the result has the same flaw as the agent comparison (two things changed at once). |
+| How is a two-model decision priced? | `DecisionResult` gains the calls made by another model (model, tokens, latency); eval prices each call with its own model's price. | Today's single `model` field would price the extractor at the main model's rate. |
+
+### Steps
+
+1. [x] Lookups, not memory: probe `gemini-2.5-flash` and `gemini-3.1-flash-lite` with one
+       call each; read both prices from the Vertex AI pricing page and compare with
+       `pricing.py`. Findings are written here.
+2. [x] Read the errors, no model call: from the three Phase 7 run files of the workflow
+       with reasoning on, collect the rationales of every APPLY or PREPARE posting rated
+       SKIP (8 cases) and set them next to the agent's and the reasoning-off rationales
+       for the same postings. Written here as "what the model says when it throws a good
+       job away" (D48). Dev set only. No prompt is changed because of it.
+3. [x] Audit, written down: the table above completed for every prompt, schema
+       description and tool description, as input for `docs/architecture.md`.
+4. [x] Logic into `rules.py`
+       - Move the FX constants and `to_try`; `tools.py` only wraps them.
+       - D51: `check_rules` answers the English flag as `apply_rules` computes it. Replay
+         the 81 recorded `check_rules` calls of Phase 7 through the old and the new
+         function (a script, no model call) and report how many answers differ.
+       - Tests: moved function tested where it now lives; one positive and one negative
+         test for the English flag of the tool; the tool descriptions are asserted
+         unchanged, so the agent's prompt hash stays `e71ed0536d15…`.
+5. [x] `schema.py`: `PostingFacts` and `FitDecision`. Their field descriptions are the
+       same constants `JobDecision` uses, so the wording cannot drift. A test shows that
+       the two together have exactly the fields of `JobDecision`.
+6. [x] `extract.py` (new)
+       - `extract_facts(posting_text, *, model, provider, llm) -> ExtractionResult`:
+         one call, validation, one retry, as in the workflow.
+       - `decide_with_extractor(posting_text, cv, *, model, extractor_model, …)
+         -> DecisionResult`: extract, decide, join, `apply_rules`.
+       - A failed extraction fails the posting (D5/D25): no fallback to the workflow.
+       - Prompt fingerprint covering both prompts and both schemas; command line as for
+         the workflow and the agent.
+7. [x] `workflow.py`, `eval.py`, `compare.py`
+       - `DecisionResult` carries the other model's calls; eval prices per model and
+         stores the extractor model in the run file and in its name.
+       - `--version extractor [--extractor-model <id>]`; a fourth run-file check: runs
+         of one version are comparable only with the same extractor model.
+       - Report line: on how many postings a rule fired, and the cost the skipped main
+         calls would have saved.
+       - `compare --table reference` shows the new rows next to the Phase 7 rows.
+8. [x] Tests for steps 5–7 (fake LLM, no network): facts and fit joined correctly; rules
+       fire on the extractor's facts; retry and failure of each call; tokens and cost
+       split per model, expected values derived from the price constants; the CV never
+       reaches the extractor's prompt; file name and hashes. Then `uv run ruff check .`,
+       `uv run ruff format --check .`, `uv run pytest`.
+9. [x] Live runs on the dev set, sequential: `--limit 2` smoke run; 3 runs with reasoning
+       on; 3 runs with reasoning off; the control only after a win; the agent re-run
+       only if step 4 says so. An aborted run is repeated or reported as "not run".
+       No `--judge`.
+10. [x] Decision by the rule of D52, applied to the numbers as they are. Also reported,
+        not decisive: kappa, latency, predictions that changed between runs, on which
+        postings the rules fired compared with the reference runs, and the three
+        postings that were wrong in all 12 reference runs.
+11. [x] `docs/architecture.md`, at most one page: the business problem; the baseline
+        (always SKIP: 63.0%, weighted error 0.96, kappa 0); a table of every LLM call
+        with the reason it exists and what code does instead of it; the traps with the
+        measured evidence; the keep/drop result. Drafted by Claude, marked "not yet
+        confirmed" until the candidate edits or approves it.
+12. [x] `docs/results.md`: a section "Sub-agent experiment (Phase 8)" with the table
+        from `compare`, the rule, the decision and how much to trust it. `README.md`:
+        link to the architecture page. If kept (D53): the choice on the page.
+13. [~] `AGENTS.md` (folder line, command, lessons), results and findings recorded here,
+        `ruff format`, commit `phase-8: agent architecture`; push after the pre-push
+        check and the candidate's go-ahead.
+
+### Results of steps 1–8 (2026-11-22)
+
+`ruff check` and `ruff format --check` clean; 528 tests pass (485 at the start).
+
+**Lookups (step 1).** Both models answer in `global` (one decision each on the Accenture
+sample, which is not in the test set): `gemini-2.5-flash` 2,445 / 2,038 tokens, 13.4 s;
+`gemini-3.1-flash-lite` 2,749 / 272 tokens, 3.9 s. The prices were not read again: the
+table in `pricing.py` was checked against the pricing page earlier the same day
+(Phase 7, `PRICES_CHECKED_ON = 2026-11-22`).
+
+**Error reading (step 2).** In the three Phase 7 runs of the workflow with reasoning on,
+a good or preparable job was rated SKIP 8 times, on three postings: Miny (APPLY) and
+Getir senior AI engineer (PREPARE) in all three runs, Fuzul mobile development
+specialist (APPLY) in two.
+- No hard rule fired on any of the 8. The SKIP is the model's own decision every time,
+  so the extracted facts play no part in this error.
+- The rationale has the same shape in all 8: several sentences of what matches, then one
+  requirement named as "core" (Go; Flutter as the current main stack; Python/FastAPI)
+  that the CV covers only partly, and that single gap is filed under "the core stack
+  does not match" (SKIP) instead of "one or two gaps" (PREPARE).
+- On the same postings the workflow with reasoning off answered PREPARE or APPLY in all
+  9 decisions, and the agent in 7 of 9 (its two SKIPs are on Getir). Their rationales
+  name the same gap and weigh it as closable.
+- The rationales of the three reasoning-on runs are word for word identical on Miny and
+  Getir: at temperature 0 this is a stable reading, not a random slip.
+- What it means for this phase: the mistake is in the judgment step, which the
+  extraction sub-agent does not touch. A gain from the sub-agent would have to come
+  from the shorter prompt and schema of the main model, not from better facts.
+- What it means for Phase 11: the first candidate for a guarded prompt change is the
+  line between "core stack does not match" and "one gap". Nothing was changed now.
+
+**Audit (step 3).** The table under "What the audit already shows" is complete: no
+other prompt, field description or tool description carries a decision threshold or a
+rule. The judge rubric (`judge.py`) is a scoring instruction, not decision logic, and
+is out of scope.
+
+**Logic into `rules.py` (step 4).**
+- `FX_RATES_TO_TRY`, `FX_RATES_CHECKED_ON` and `to_try` moved from `tools.py`; new
+  `rules.english_risk(llm_flag, posting_text)`, used by `apply_rules` and by the
+  `check_rules` tool, so the flag is computed in one place.
+- `build_tools(cv, posting_text)`: the tool closes over the posting for the keyword
+  check. No description changed; the prompt hashes are still `5401d5edd350…`
+  (workflow) and `e71ed0536d15…` (agent).
+- **Replay (D51): 81 recorded `check_rules` calls, 0 with a different answer** under the
+  new function, in all three agent reference runs. On every dev posting where the
+  keyword check matches, the agent had already passed `english_required = true`. The
+  Phase 7 agent row stands and is not re-run.
+
+**What was built (steps 5–8)**
+
+| Module | New |
+|---|---|
+| `schema.py` | `PostingFacts`, `FitDecision`, `join_decision`; field descriptions as shared constants (the JSON schema of `JobDecision` is byte-identical, shown by the unchanged hash) |
+| `workflow.py` | `call_validated` (call, validate, retry once) shared by the workflow and the extractor version; `ModelCall` and `DecisionResult.extra_calls` |
+| `extract.py` | `extract_facts`, `decide_with_extractor`, the two prompts, the fingerprint, a command line |
+| `eval.py` | `--version extractor`, `--extractor-model`; cost per model (`extra_usage`); `rules_fired_postings` and `skippable_cost_usd`; the sub-agent's model in the run file and its name |
+| `compare.py` | an extractor run is named after its sub-agent, so runs with different sub-agent models are never one row |
+
+**Smoke run (step 9).** `eval --version extractor --reasoning on --limit 2` ran end to
+end: two calls per posting, the sub-agent priced separately ($0.0007 of $0.0125), run
+file `2026-11-22_204004_…_extractor-gemini-3.1-flash-lite_reasoning-on.json`.
+
+**Deviations from the plan above**
+- Prices were not re-read from the pricing page (see lookups).
+- No separate "comparable only with the same extractor model" check in `compare`: the
+  sub-agent's model is part of the configuration name, which keeps such runs apart.
+- The extractor command line (`python -m job_fit.extract`) has no `--extractor-model`
+  option; it uses the default. Eval has the option.
+- `DecisionResult.input_tokens` / `output_tokens` are the deciding model's tokens only;
+  other models' usage is in `extra_calls`. `attempts` and `latency_s` cover all calls.
+
+### Live results (steps 9–12, 2026-11-22)
+
+Dev set, 27 postings (dataset SHA-256 `02f2239aa4ad…`), Vertex AI `global`, three runs
+per row, no failed call and no schema retry. Extractor version: prompt SHA-256
+`05c51d412c83…`, extractor `gemini-3.1-flash-lite`. Run and summary files are in
+`data/results/`, named `2026-11-22_20…_gemini-2.5-flash_extractor-gemini-3.1-flash-lite_…`.
+The workflow rows are the Phase 7 reference runs. Full discussion: `docs/results.md`,
+"Sub-agent experiment (Phase 8)".
+
+| Configuration | Accuracy | Weighted error (mean), range | APPLY recall | Kappa | Cost per 100 | Latency | Predictions that changed between runs |
+|---|---|---|---|---|---|---|---|
+| Workflow, reasoning on | 65.4% ± 2.1% | 0.51 ± 0.06, 0.44–0.56 | 44% ± 10% | 0.37 ± 0.04 | $0.62 | 11.4 s | 5 of 27 |
+| Extractor, reasoning on | 64.2% ± 5.7% | 0.48 ± 0.06, 0.41–0.52 | 39% ± 10% | 0.36 ± 0.09 | $0.58 | 12.3 s | 9 of 27 |
+| Workflow, reasoning off | 60.5% ± 2.1% | 0.40 ± 0.02, 0.37–0.41 | 44% ± 10% | 0.38 ± 0.02 | $0.156 | 2.7 s | 6 of 27 |
+| Extractor, reasoning off | 63.0% ± 6.4% | 0.37 ± 0.06, 0.30–0.41 | 50% ± 0% | 0.41 ± 0.09 | $0.154 | 4.0 s | 5 of 27 |
+
+- **Decision by D52: drop, in both pairs.** Weighted error moves by 0.025 in each, a
+  third of the noise figure; cost falls by 6.3% and 1.6%, under the 10% bar; APPLY
+  recall is lower in the first pair. The control run (main model as extractor) was not
+  made, as planned for a result without a win. The agent was not re-run (replay, D51).
+- The rules fired on the same three postings in every run of both versions (Kaslıfilozof:
+  location; Loodos intern and Sezzle junior: seniority). The extractor never caused a
+  wrong SKIP and never missed a rule the main model's facts triggered.
+- Good or preparable jobs rated SKIP with reasoning on: 3 + 4 in three runs (workflow
+  5 + 3). Miny and Getir are wrong in every run of both versions.
+- Cost: the main model uses fewer tokens when it does not extract (about 52k / 53k per
+  run against 60k / 60k), which outweighs the extractor's $0.03 per 100 postings.
+- Computed, not built: skipping the main call on rule-decided postings would bring the
+  cost to about $0.52 per 100 (−17%) with reasoning on and $0.141 (−9.6%) off.
+- The noise figure stays 0.077 (Phase 7). The largest standard deviation among these
+  four rows is 0.064.
+- Spend at list price: about $0.47 for the three runs with reasoning on, $0.12 with
+  reasoning off, a few cents for the smoke run and the probes.
+- D53: the extractor version is not offered on the page; `ui.py` is unchanged.
+
+### Findings to carry into Phase 9
+
+- The open question of D48 is narrower now: the workflow with reasoning on throws good
+  jobs away in the judgment step, by filing one partly covered requirement under "the
+  core stack does not match". Neither the facts nor the rules are involved. This is the
+  first candidate for Phase 11; Phase 9's `search_experience` could also bear on it (does
+  better evidence about a partly covered skill change the reading?), which the plan of
+  Phase 9 should measure and not assume.
+- `convert_currency` still has no consumer. Phase 9's salary-floor preference is the
+  point to give it one or remove it.
+- The APPLY / PREPARE / SKIP definitions are worded differently in the prompts and in the
+  `decision` field description (D50); a Phase 11 prompt change must touch both.
+- `compare --table reference` averages the judge score over whatever judge files sit
+  next to a group's runs and labels it with the first judge model; a leftover trial file
+  of another judge model changes the number. Pass judged runs deliberately or fix this
+  before the judge is used again.
+- If Phase 10 builds an `extract` node, `extract.py` is ready and needs no CV; its value
+  there is skipping rule-decided postings, 3 of 27 on this set.
+
+**Done when:** `docs/architecture.md` exists and is confirmed by the candidate, and the
+sub-agent has a keep or drop decision in `docs/results.md` backed by 3-run numbers on
+the dev set.
+
+**Not in this phase:** any change to the workflow's or the agent's prompts or to
+`JobDecision`; a second sub-agent; a requirements list from the extractor; skipping the
+main call (built only after a keep); a salary rule or field (Phase 9); LangGraph
+(Phase 10); prompt tuning from the error reading of step 2 (Phase 11); the held-out
+set; the judge.
+
+**Risks**
+- **The likely result is "drop".** The extractor adds a call, and extraction was not
+  where the measured errors were: the rules changed 2 outcomes in three runs with
+  reasoning on. A drop backed by numbers is what the phase asks for; the plan must not
+  be bent afterwards to find a win.
+- **Two pairs, two chances for noise to look like a gain.** A win in one pair only is
+  reported as weak, and the control run comes before anything is built on it.
+- **A wrong fact from the cheaper model forces a wrong SKIP**, the most expensive
+  error. Rule firings are compared posting by posting with the reference runs, where
+  the main model extracted.
+- **The comparison is not a clean single-variable test.** The main model's prompt and
+  output schema both shrink. The page will say so, as it does for the agent.
+- **27 postings, 6 APPLY.** One posting is 17 points of APPLY recall; "APPLY recall not
+  lower" is read on the mean of three runs.
+- **D51 changes what a tool returns while its description, and so the prompt hash,
+  stays the same.** The replay in step 4 is what keeps the agent row honest; if it
+  shows a difference the row is re-run, not explained away.
+- Spend (list price, rough): reasoning on about $0.55 for 3 runs, reasoning off about
+  $0.20, the control about $0.55, an agent re-run about $0.60; under $2 if everything
+  is needed, under $1 otherwise.
 
 ## Phase 9 – Agentic RAG, MCP and memory (roadmap)
 

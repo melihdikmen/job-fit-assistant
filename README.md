@@ -88,6 +88,7 @@ second model rate the rationales:
 ```
 uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --runs 3 --judge
 uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --version agent --runs 3
+uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --version extractor --runs 3
 ```
 
 Build the comparison tables from saved runs:
@@ -171,8 +172,25 @@ Dev set, 27 postings, three runs per configuration, mean ± standard deviation.
   the next phases look for why that workflow rates good jobs as `SKIP`; see the end of
   [docs/results.md](docs/results.md).
 
+### Sub-agent experiment (Phase 8)
+
+A cheap model (`gemini-3.1-flash-lite`) extracts the facts from the posting, then
+`gemini-2.5-flash` judges the fit; three runs per row against the workflow rows above.
+The keep-or-drop rule was written down before the runs.
+
+| Pair | Weighted error (mean) | APPLY recall | Cost per 100 postings | Avg. latency |
+|---|---|---|---|---|
+| Reasoning on: workflow → with extractor | 0.51 → 0.48 | 44.4% → 38.9% | $0.62 → $0.58 | 11.4 → 12.3 s |
+| Reasoning off: workflow → with extractor | 0.40 → 0.37 | 44.4% → 50.0% | $0.156 → $0.154 | 2.7 → 4.0 s |
+
+**Dropped.** The change is a third of the noise figure. The hard rules fired on the same
+three postings in every run of both versions, so the facts were already read correctly;
+the costly mistake is made when the model weighs one missing skill.
+[docs/architecture.md](docs/architecture.md) explains why each model call exists and
+what Phase 8 moved into code.
+
 The two sections below are the Week 1 results, on the earlier set of 21 postings. They
-are not comparable with the table above.
+are not comparable with the tables above.
 
 ### Model comparison (Week 1)
 
@@ -229,6 +247,8 @@ src/job_fit/
   workflow.py   fixed workflow: one call, validate, retry once, apply rules
   agent.py      agent version (comparison only)
   tools.py      the agent's three read-only tools
+  extract.py    extractor version: a cheap sub-agent reads the facts, the model judges
+                the fit (measured in Phase 8, comparison only)
   dataset.py    load, validate, label and split the labeled set
   metrics.py    accuracy, confusion matrix, precision/recall, kappa, weighted error, baselines
   pricing.py    dated list prices
@@ -241,6 +261,7 @@ data/           postings.jsonl (labeled set), postings_dev.jsonl, postings_heldo
                 label_log.jsonl, judge_calibration.jsonl, postings/, samples/, cv.example.md
 tests/          pytest suite, no network
 docs/results.md full results
+docs/architecture.md  the business problem, the baseline, why each LLM call exists
 ```
 
 ## How it was built

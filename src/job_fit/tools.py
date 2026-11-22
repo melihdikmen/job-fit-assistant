@@ -1,23 +1,26 @@
 """Tools the agent can call: the hard rules, the CV by section, and a currency converter.
 
-The logic lives in pure functions (``rule_check``, ``split_cv_sections``,
-``find_cv_section``, ``to_try``); ``build_tools`` wraps them as LangChain tools. The
-tool descriptions below are what the model reads, so they are part of the agent's prompt.
+The business logic lives in ``rules.py`` (the hard rules, the English check, the
+currency conversion); the functions here only adapt it (``rule_check``) or read the CV
+(``split_cv_sections``, ``find_cv_section``), and ``build_tools`` wraps them as LangChain
+tools. The tool descriptions below are what the model reads, so they are part of the
+agent's prompt.
 """
 
 from typing import Any
 
 from langchain_core.tools import BaseTool, ToolException, tool
 
-from job_fit.rules import violated_rules
+from job_fit.rules import (
+    FX_RATES_CHECKED_ON,
+    FX_RATES_TO_TRY,
+    english_risk,
+    to_try,
+    violated_rules,
+)
 
 CV_SECTION_HEADING_PREFIX = "## "
 FORCED_DECISION = "SKIP"
-
-# Fixed rates instead of a live FX API: no network dependency and the same answer on
-# every run. Approximate mid-market rates as published by xe.com on the date below.
-FX_RATES_TO_TRY: dict[str, float] = {"USD": 50.0, "EUR": 56.1}
-FX_RATES_CHECKED_ON = "2026-11-04"
 
 CHECK_RULES_DESCRIPTION = (
     "Check a job against the candidate's hard rules. Pass the facts exactly as the "
@@ -42,7 +45,11 @@ CONVERT_CURRENCY_DESCRIPTION = (
 
 
 def rule_check(
-    location: str, work_mode: str, english_required: bool, seniority: str
+    location: str,
+    work_mode: str,
+    english_required: bool,
+    seniority: str,
+    posting_text: str = "",
 ) -> dict[str, Any]:
     """Run the hard rules on facts extracted from a posting.
 
@@ -51,16 +58,19 @@ def rule_check(
         work_mode: One of "remote", "hybrid", "onsite", "unknown".
         english_required: True if the posting asks for strong English.
         seniority: One of "intern", "junior", "mid", "senior", "lead", "unknown".
+        posting_text: Full text of the posting, for the keyword check on English;
+            empty if it is not available.
 
     Returns:
         ``violated_rules`` (rule names), ``forced_decision`` ("SKIP" or None) and
-        ``english_risk`` (the flag as given; it never forces a decision).
+        ``english_risk`` (the flag as given or a keyword match in the posting, the
+        same way the rules compute it on the final output; it never forces a decision).
     """
     violations = violated_rules(location, work_mode.strip().lower(), seniority.strip().lower())
     return {
         "violated_rules": violations,
         "forced_decision": FORCED_DECISION if violations else None,
-        "english_risk": english_required,
+        "english_risk": english_risk(english_required, posting_text),
     }
 
 
@@ -108,36 +118,16 @@ def find_cv_section(sections: dict[str, str], topic: str) -> str | None:
     return None
 
 
-def to_try(amount: float, currency: str) -> float:
-    """Convert an amount to Turkish lira at the fixed rate.
+def build_tools(cv: str, posting_text: str = "") -> list[BaseTool]:
+    """Create the agent's tools for one candidate CV and one posting.
 
-    Args:
-        amount: Amount of money; must not be negative.
-        currency: "USD" or "EUR", in any letter case.
-
-    Returns:
-        The amount in TRY, rounded to two decimals.
-
-    Raises:
-        ValueError: If the amount is negative or the currency is not supported.
-    """
-    if amount < 0:
-        raise ValueError("The amount must not be negative.")
-    code = currency.strip().upper()
-    if code not in FX_RATES_TO_TRY:
-        supported = ", ".join(FX_RATES_TO_TRY)
-        raise ValueError(f"Unsupported currency '{currency}'. Supported: {supported}.")
-    return round(amount * FX_RATES_TO_TRY[code], 2)
-
-
-def build_tools(cv: str) -> list[BaseTool]:
-    """Create the agent's tools for one candidate CV.
-
-    The tools are closures over the CV, so nothing is kept in module-level state and
-    tests can build them from a small fake CV.
+    The tools are closures over the CV and the posting, so nothing is kept in
+    module-level state and tests can build them from a small fake CV.
 
     Args:
         cv: Full text of the candidate's CV.
+        posting_text: Full text of the posting being decided; ``check_rules`` runs the
+            keyword check on English against it. It does not change any description.
 
     Returns:
         The tools ``check_rules``, ``get_cv_section`` and ``convert_currency``.
@@ -150,7 +140,7 @@ def build_tools(cv: str) -> list[BaseTool]:
         location: str, work_mode: str, english_required: bool, seniority: str
     ) -> dict[str, Any]:
         """Check a job against the candidate's hard rules."""
-        return rule_check(location, work_mode, english_required, seniority)
+        return rule_check(location, work_mode, english_required, seniority, posting_text)
 
     @tool(description=GET_CV_SECTION_DESCRIPTION.format(topics=topics))
     def get_cv_section(topic: str) -> str:

@@ -6,10 +6,13 @@ from typing import Any
 import pytest
 
 from job_fit.rules import (
+    FX_RATES_TO_TRY,
     RULE_LOCATION,
     RULE_SENIORITY,
     apply_rules,
+    english_risk,
     has_english_risk,
+    to_try,
     violated_rules,
 )
 from job_fit.schema import JobDecision
@@ -290,3 +293,38 @@ def test_input_decision_is_not_mutated() -> None:
     assert llm_decision.decision == "APPLY"
     assert llm_decision.english_risk is False
     assert llm_decision.rationale == "Strong match on the main stack."
+
+
+@pytest.mark.parametrize(
+    ("llm_flag", "posting_text", "expected"),
+    [
+        (False, NEUTRAL_POSTING, False),
+        (True, NEUTRAL_POSTING, True),
+        (False, "Advanced English is a must.", True),
+        (True, "", True),
+        (False, "", False),
+    ],
+)
+def test_english_risk_is_the_model_flag_or_the_keyword_match(
+    llm_flag: bool, posting_text: str, expected: bool
+) -> None:
+    """Either source raises the flag; neither leaves it down."""
+    assert english_risk(llm_flag, posting_text) is expected
+
+
+@pytest.mark.parametrize(("currency", "code"), [("USD", "USD"), ("eur", "EUR"), (" usd ", "USD")])
+def test_to_try_converts_at_the_fixed_rate(currency: str, code: str) -> None:
+    """USD and EUR are converted with the rate from the constant table."""
+    assert to_try(1000, currency) == round(1000 * FX_RATES_TO_TRY[code], 2)
+
+
+def test_to_try_rejects_an_unsupported_currency() -> None:
+    """A currency without a fixed rate is an error that names the supported ones."""
+    with pytest.raises(ValueError, match="Unsupported currency 'GBP'. Supported: USD, EUR"):
+        to_try(100, "GBP")
+
+
+def test_to_try_rejects_a_negative_amount() -> None:
+    """A negative salary is rejected."""
+    with pytest.raises(ValueError, match="negative"):
+        to_try(-1, "USD")

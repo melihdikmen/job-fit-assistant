@@ -143,9 +143,13 @@ def _run_name(report: EvalReport) -> str:
         report: Report of the run.
 
     Returns:
-        E.g. "gemini-2.5-flash (reasoning off)" or "gemini-2.5-flash (agent, reasoning on)".
+        E.g. "gemini-2.5-flash (reasoning off)", "gemini-2.5-flash (agent, reasoning on)"
+        or "gemini-2.5-flash (extractor gemini-3.1-flash-lite, reasoning on)". Runs with
+        different sub-agent models get different names, so they are never one row.
     """
     details = [] if report.version == DEFAULT_VERSION else [report.version]
+    if report.extractor_model:
+        details[0] += f" {report.extractor_model}"
     if report.reasoning != DEFAULT_REASONING:
         details.append(f"reasoning {report.reasoning}")
     return f"{report.model} ({', '.join(details)})" if details else report.model

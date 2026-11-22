@@ -18,6 +18,11 @@ REMOTE = "remote"
 OFFICE_WORK_MODES = frozenset({"onsite", "hybrid"})
 BLOCKED_SENIORITIES = frozenset({"intern", "junior"})
 
+# Fixed rates instead of a live FX API: no network dependency and the same answer on
+# every run. Approximate mid-market rates as published by xe.com on the date below.
+FX_RATES_TO_TRY: dict[str, float] = {"USD": 50.0, "EUR": 56.1}
+FX_RATES_CHECKED_ON = "2026-11-04"
+
 # Match data below is compared against normalized text (see _normalize), so it is
 # written lowercase and without Turkish diacritics. Names are matched as whole words:
 # "istanbul" must not match "Istanbulska", nor "turkey" a longer word.
@@ -186,6 +191,42 @@ def has_english_risk(posting_text: str) -> bool:
     return any(pattern.search(text) for pattern in _ENGLISH_RISK_PATTERNS)
 
 
+def english_risk(llm_flag: bool, posting_text: str) -> bool:
+    """Decide the English risk flag: the model's reading or the keyword check.
+
+    Args:
+        llm_flag: True if the model read a strong English requirement in the posting.
+        posting_text: Full text of the job posting; empty if it is not available.
+
+    Returns:
+        True if either the model or the keyword check says so. The flag never forces
+        a decision.
+    """
+    return llm_flag or has_english_risk(posting_text)
+
+
+def to_try(amount: float, currency: str) -> float:
+    """Convert an amount to Turkish lira at the fixed rate.
+
+    Args:
+        amount: Amount of money; must not be negative.
+        currency: "USD" or "EUR", in any letter case.
+
+    Returns:
+        The amount in TRY, rounded to two decimals.
+
+    Raises:
+        ValueError: If the amount is negative or the currency is not supported.
+    """
+    if amount < 0:
+        raise ValueError("The amount must not be negative.")
+    code = currency.strip().upper()
+    if code not in FX_RATES_TO_TRY:
+        supported = ", ".join(FX_RATES_TO_TRY)
+        raise ValueError(f"Unsupported currency '{currency}'. Supported: {supported}.")
+    return round(amount * FX_RATES_TO_TRY[code], 2)
+
+
 def apply_rules(decision: JobDecision, posting_text: str) -> RuleOutcome:
     """Apply the hard rules on top of the LLM's decision.
 
@@ -207,7 +248,7 @@ def apply_rules(decision: JobDecision, posting_text: str) -> RuleOutcome:
         update={
             "decision": "SKIP" if fired else decision.decision,
             "rationale": decision.rationale + rule_notes,
-            "english_risk": decision.english_risk or has_english_risk(posting_text),
+            "english_risk": english_risk(decision.english_risk, posting_text),
         }
     )
     return RuleOutcome(decision=final, fired_rules=tuple(fired))

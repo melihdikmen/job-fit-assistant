@@ -239,7 +239,7 @@ def decide_with_agent(
     make_chat_model = chat_model_factory or chat_model
     agent = create_agent(
         make_chat_model(provider, model, reasoning=reasoning, timeout_s=timeout_s),
-        build_tools(cv),
+        build_tools(cv, posting_text),
         system_prompt=AGENT_SYSTEM_PROMPT,
         response_format=ToolStrategy(JobDecision),
         middleware=[ModelCallLimitMiddleware(run_limit=max_steps, exit_behavior="error")],
