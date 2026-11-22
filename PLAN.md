@@ -11,7 +11,7 @@
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
-| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 (code and 473 tests, no eval run yet); waiting for the candidate: labels (`dataset label`), rubric approval, Langfuse keys |
+| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 (code and 479 tests, tracing verified live, no eval run yet); waiting for the candidate: labels (`dataset label --show-suggestion`, D45) and rubric approval |
 | 8 – Agent architecture | ⬜ | | roadmap only |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
@@ -164,6 +164,15 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   the schema field descriptions and the retry note; the CV gets its own hash.
 - The candidate accepted D38-D44 as proposed on 2026-11-22 and told Claude to go on;
   Claude took that as approval of the Phase 7 plan.
+
+- D45 (2026-11-22): the candidate asked Claude to do the labeling. Claude asked back
+  once, because labels set by a model would make every Phase 7 number measure
+  agreement between two models instead of fit to the candidate, and offered three
+  ways. The candidate chose **quick confirmation**: `dataset label --show-suggestion`
+  shows the suggested label, Enter accepts it and a letter changes it. Every such
+  label is marked `saw_suggestion` in `data/label_log.jsonl`, and `docs/results.md`
+  must say that the labels were confirmed with the suggestion on screen, not given
+  independently.
 
 ## What the candidate does (Claude cannot)
 
@@ -1372,7 +1381,7 @@ These are the parts only the candidate can do. Steps 1–8 need none of them.
       stack in a blocked city, a junior role with a matching stack, no location given.
 - [ ] Edit or approve the judge rubric that Claude drafts (step 5), then **score 10
       rationales yourself**, 1–5, before seeing the judge's scores.
-- [ ] Create a Langfuse project and put its keys into `.env` (D42).
+- [x] Create a Langfuse project and put its keys into `.env` (D42).
 - [ ] Budget alert in the Google Cloud console, still open from Phase 3.
 
 ### Design
@@ -1519,11 +1528,20 @@ counts hold, the set has APPLY 9, PREPARE 9, SKIP 22, which meets D39.
 - The cost of an agent trace is whatever Langfuse derives from token counts; only
   workflow and judge generations carry the cost computed from `pricing.py`.
 
-**Commands for the candidate's steps**
+**Tracing smoke test (2026-11-22).** With the candidate's Langfuse keys in `.env`
+(`auth_check` true, EU region) one traced workflow decision was made on the
+Accenture sample, which is not in the test set, and read back through the Langfuse
+API: a `decide` span and a `generate_json` generation with model, tokens
+(2,445 / 2,038), cost ($0.0058, equal to `pricing.py` applied to those tokens),
+latency and the experiment tag. The stored trace holds the CV marker and none of
+the CV's 77 maskable lines.
+
+**Commands for the candidate's steps** (quick confirmation, D45; leave out
+`--show-suggestion` to label blind)
 
 ```
-uv run python -m job_fit.dataset label --source data/postings/postings_week2.jsonl
-uv run python -m job_fit.dataset label --source data/postings.jsonl
+uv run python -m job_fit.dataset label --show-suggestion --source data/postings/postings_week2.jsonl
+uv run python -m job_fit.dataset label --show-suggestion --source data/postings.jsonl
 uv run python -m job_fit.dataset check
 uv run python -m job_fit.dataset split
 ```

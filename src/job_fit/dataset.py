@@ -59,6 +59,11 @@ LABEL_ANSWERS: dict[str, DecisionLabel] = {
 }
 LABEL_PROMPT = "Your label: [a]pply / [p]repare / [s]kip, or [q]uit and continue later > "
 NOTE_PROMPT = "Your reason in a few words (Enter for none) > "
+CONFIRM_LABEL_PROMPT = (
+    "Enter to accept the suggestion, or [a]pply / [p]repare / [s]kip to change it, "
+    "or [q]uit and continue later > "
+)
+CONFIRM_NOTE_PROMPT = "Your reason in a few words (Enter keeps the suggested note) > "
 SEPARATOR = "=" * 78
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -99,8 +104,11 @@ class LabelRecord(BaseModel):
     Attributes:
         id: Posting id.
         suggested: Label the row carried before the candidate looked at it.
-        own: Label the candidate chose without seeing the suggestion.
+        own: Label the candidate chose.
         note: The candidate's reason.
+        saw_suggestion: True if the suggested label was on screen when the candidate
+            chose. Such a label is confirmed by the candidate, not independent of the
+            suggestion.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -109,6 +117,7 @@ class LabelRecord(BaseModel):
     suggested: DecisionLabel
     own: DecisionLabel
     note: str = ""
+    saw_suggestion: bool = False
 
 
 def _describe_problems(error: ValidationError) -> str:
@@ -357,18 +366,24 @@ def label_session(
     ask: AskFn,
     show: ShowFn,
     save: SaveFn,
+    show_suggestion: bool = False,
 ) -> bool:
     """Ask the candidate for a label for every posting not labeled yet.
 
-    Only the company, the role and the posting text are shown: never the label or the
-    note the row carries, and never a model's output.
+    By default only the company, the role and the posting text are shown: never the
+    label or the note the row carries, and never a model's output. With
+    ``show_suggestion`` the row's label and note are shown too and an empty answer
+    accepts them; that is quicker, and it is recorded, because a label chosen with the
+    suggestion on screen is not independent of it.
 
     Args:
-        postings: Rows to label, each carrying a suggested label that stays hidden.
+        postings: Rows to label, each carrying a suggested label.
         done_ids: Ids already labeled in an earlier session.
         ask: Shows a prompt and returns the typed answer.
         show: Prints text to the candidate.
         save: Stores one decision; called right after each answer.
+        show_suggestion: True to show the suggested label and note and let Enter
+            accept them.
 
     Returns:
         True if every posting is labeled, False if the candidate quit before the end.
@@ -380,14 +395,26 @@ def label_session(
         show(SEPARATOR)
         show(posting.text)
         show("")
+        if show_suggestion:
+            show(f"Suggested: {posting.label}" + (f" ({posting.note})" if posting.note else ""))
         own = None
         while own is None:
-            answer = ask(LABEL_PROMPT)
-            if answer.strip().lower() == QUIT_ANSWER:
+            answer = ask(CONFIRM_LABEL_PROMPT if show_suggestion else LABEL_PROMPT).strip()
+            if answer.lower() == QUIT_ANSWER:
                 return False
-            own = parse_label(answer)
-        note = ask(NOTE_PROMPT).strip()
-        save(LabelRecord(id=posting.id, suggested=posting.label, own=own, note=note))
+            own = posting.label if show_suggestion and not answer else parse_label(answer)
+        note = ask(CONFIRM_NOTE_PROMPT if show_suggestion else NOTE_PROMPT).strip()
+        if show_suggestion and not note:
+            note = posting.note
+        save(
+            LabelRecord(
+                id=posting.id,
+                suggested=posting.label,
+                own=own,
+                note=note,
+                saw_suggestion=show_suggestion,
+            )
+        )
     return True
 
 
@@ -430,9 +457,11 @@ def format_agreement(records: Sequence[LabelRecord]) -> str:
     suggested = [record.suggested for record in records]
     own = [record.own for record in records]
     changed = [record for record in records if record.suggested != record.own]
+    seen = sum(1 for record in records if record.saw_suggestion)
     lines = [
         f"labeled: {len(records)} postings, {len(changed)} differ from the suggested label",
         f"agreement with the suggestions: kappa {cohen_kappa(suggested, own):.2f}",
+        f"suggestion on screen while labeling: {seen} of {len(records)}",
     ]
     lines += [
         f"  {record.id}: suggested {record.suggested}, yours {record.own}" for record in changed
@@ -490,6 +519,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="JSONL rows to label; may be the test set itself or a file of new postings.",
     )
     label.add_argument("--log", type=Path, default=LABEL_LOG_PATH, help="Decision log (JSONL).")
+    label.add_argument(
+        "--show-suggestion",
+        action="store_true",
+        help="Show the suggested label; Enter accepts it. Quicker, but not independent.",
+    )
 
     split = commands.add_parser("split", help="Write the dev and the held-out file.")
     split.add_argument("--dev", type=Path, default=DEV_DATA_PATH, help="Dev set to write.")
@@ -565,6 +599,7 @@ def _run_label(args: argparse.Namespace, ask: AskFn) -> int:
         ask=ask,
         show=print,
         save=lambda record: append_label_record(args.log, record),
+        show_suggestion=args.show_suggestion,
     )
     source_ids = {posting.id for posting in source}
     records = [record for record in load_label_log(args.log) if record.id in source_ids]

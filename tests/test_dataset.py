@@ -552,3 +552,99 @@ def test_cli_split_refuses_an_incomplete_set(
 
     assert main(argv) == 1
     assert "incomplete" in capsys.readouterr().err
+
+
+def test_confirm_mode_shows_the_suggestion_and_enter_accepts_it() -> None:
+    """With the suggestion on screen, an empty answer keeps its label and its note."""
+    posting = Posting(**_row(label="PREPARE", note="one gap"))
+    terminal = FakeTerminal("", "")
+
+    finished = label_session(
+        [posting],
+        frozenset(),
+        ask=terminal.ask,
+        show=terminal.show,
+        save=terminal.saved.append,
+        show_suggestion=True,
+    )
+
+    assert finished is True
+    assert "Suggested: PREPARE (one gap)" in terminal.shown
+    assert terminal.saved == [
+        LabelRecord(
+            id="acme-1", suggested="PREPARE", own="PREPARE", note="one gap", saw_suggestion=True
+        )
+    ]
+
+
+def test_confirm_mode_lets_the_candidate_change_label_and_note() -> None:
+    """A typed label and reason replace the suggested ones."""
+    posting = Posting(**_row(label="PREPARE", note="one gap"))
+    terminal = FakeTerminal("s", "wrong city")
+
+    label_session(
+        [posting],
+        frozenset(),
+        ask=terminal.ask,
+        show=terminal.show,
+        save=terminal.saved.append,
+        show_suggestion=True,
+    )
+
+    record = terminal.saved[0]
+    assert (record.suggested, record.own, record.note) == ("PREPARE", "SKIP", "wrong city")
+    assert record.saw_suggestion is True
+
+
+def test_blind_mode_records_that_the_suggestion_was_hidden() -> None:
+    """A label given without the suggestion on screen is marked as such."""
+    terminal = FakeTerminal("a", "")
+
+    _session(terminal, [Posting(**_row())], frozenset())
+
+    assert terminal.saved[0].saw_suggestion is False
+
+
+def test_blind_mode_does_not_accept_an_empty_answer() -> None:
+    """Without a suggestion on screen, Enter is not a label; the prompt repeats."""
+    terminal = FakeTerminal("", "p", "")
+
+    _session(terminal, [Posting(**_row(label="SKIP"))], frozenset())
+
+    assert [record.own for record in terminal.saved] == ["PREPARE"]
+
+
+def test_agreement_report_counts_labels_given_with_the_suggestion_on_screen() -> None:
+    """The report says how many labels were confirmed rather than given blind."""
+    records = [
+        LabelRecord(id="a", suggested="APPLY", own="APPLY", saw_suggestion=True),
+        LabelRecord(id="b", suggested="SKIP", own="SKIP"),
+    ]
+
+    assert "suggestion on screen while labeling: 1 of 2" in format_agreement(records)
+
+
+def test_cli_label_confirm_mode_accepts_suggestions_with_enter(tmp_path: Path) -> None:
+    """``--show-suggestion`` lets a whole file be confirmed with the Enter key."""
+    data = tmp_path / "set.jsonl"
+    source = _write(tmp_path / "new.jsonl", _row(id="new", label="SKIP", note="suggested"))
+    log = tmp_path / "log.jsonl"
+    terminal = FakeTerminal("", "")
+
+    exit_code = main(
+        [
+            "label",
+            "--source",
+            str(source),
+            "--data",
+            str(data),
+            "--log",
+            str(log),
+            "--show-suggestion",
+        ],
+        ask=terminal.ask,
+    )
+
+    assert exit_code == 0
+    assert [(p.id, p.label, p.note) for p in load_postings(data)] == [("new", "SKIP", "suggested")]
+    assert load_label_log(log)[0].saw_suggestion is True
