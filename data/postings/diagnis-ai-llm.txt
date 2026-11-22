@@ -1,0 +1,14 @@
+Diagnis — AI Engineer (LLM)
+Ankara (Hacettepe Teknokent) · Hybrid · Tam Zamanlı
+
+Sağlık alanında AI ürünleri. Mimariyi sıfırdan kuracak kişi.
+
+Sorumluluklar: çok ajanlı LLM mimarisi, alan-özel Türkçe model fine-tuning (SFT, DPO/LoRA), hiyerarşik RAG, açıklanabilirlik ve belirsizlik yönetimi, vLLM ile inference, değerlendirme altyapısı.
+
+Aranan
+- En az 2 yıl AI iş tecrübesi
+- İleri Python ve PyTorch
+- Uçtan uca LLM fine-tuning
+- Production RAG (embedding, vektör DB, hibrit arama, Precision@k/Recall@k)
+- LangGraph veya özel orkestratör
+- vLLM/TensorRT-LLM, quantization

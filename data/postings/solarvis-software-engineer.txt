@@ -1,0 +1,22 @@
+solarVis — Software Engineer
+Ankara (ODTÜ Teknokent) · Hybrid · Full-time
+
+B2B SaaS for solar, EV charger, battery and heat pump installers.
+
+What you will do
+- Build features end to end: data models, APIs, background jobs, web UI; own them after release
+- Build with AI agents: Claude Code, Cursor, Codex daily; review AI code like a teammate's PR; set up project context files, custom commands, skills, sub-agents, hooks, AI code review in CI
+- Build AI into the product: tool calling, structured outputs, RAG, streaming; evals; guardrails and prompt-injection protection
+- Clean, tested code; CI/CD, observability, security
+
+Must-have
+- Based in Ankara
+- 2+ years software engineering
+- Strong Python (ideally FastAPI)
+- Strong TypeScript, React, Next.js
+- API design, relational DBs, caching (Redis)
+- Daily hands-on AI coding agents
+- Git, testing, Docker, CI/CD
+- Excellent conversational and written English
+
+Nice-to-have: agent workflows, RAG, vector DBs, MCP servers, evals.

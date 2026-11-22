@@ -1,0 +1,18 @@
+Miorec İnsan Kaynakları (müşterisi için) — Kıdemli Yapay Zekâ Uygulamaları Uzmanı
+İstanbul Anadolu Yakası · Hybrid · Tam Zamanlı
+
+Grup şirketlerinin ortak kullanımı için üretken AI altyapısı.
+
+Nitelikler
+- GenAI / LLM uygulama geliştirme deneyimi
+- RAG, belge arama, kaynaklı yanıt üretme, bilgi çıkarımı
+- Multi-tenant mimari, veri ayrıştırma, yetkilendirme
+- Model entegrasyonu, API geliştirme, uçtan uca geliştirme
+- Kurum içi / yurt içi bulut / hazır servis barındırma alternatifleri
+- LLMOps, izleme, sürüm yönetimi, performans değerlendirme
+- Agent tabanlı uygulamalar, RPA entegrasyonu
+- Yanıt kalitesi, kaynak doğruluğu, halüsinasyon, süre ve maliyet değerlendirmesi
+- KVKK, bilgi güvenliği
+- Make or Buy değerlendirmesi
+- Kod inceleme, dokümantasyon, SDLC
+- Ekip koordinasyonu, mentorluk

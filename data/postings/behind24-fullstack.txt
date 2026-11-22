@@ -1,0 +1,16 @@
+BEHIND24 | Intelligence-Driven Cyber Defense — Full Stack Engineer
+Türkiye · Uzaktan · Tam Zamanlı
+
+Sorumluluklar: modern frontend ile web uygulamaları, backend servisleri, REST ve mikroservis, PostgreSQL/MySQL/MongoDB tasarımı, 3. parti API entegrasyonları, asenkron görevler, güvenlik ve performans, test ve CI/CD.
+
+Aranan
+- Full-Stack deneyim
+- JavaScript / TypeScript
+- React ve Next.js
+- Node.js veya Python backend
+- REST API tasarımı
+- SQL ve NoSQL
+- Git, Docker
+- Clean Code, SOLID
+
+Tercih: mikroservis, Redis/RabbitMQ/Kafka, Elasticsearch, Kubernetes, WebSocket, otomatik test, secure coding.

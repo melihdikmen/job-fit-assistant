@@ -1,0 +1,17 @@
+Algoria Ventures — Forward Deployed Engineer, Yazılım Geliştirme
+İstanbul (Avrupa/Anadolu) veya Ankara · Uzaktan mümkün · Tam Zamanlı · 10 kişi
+
+Kurumlar için AI ürünleri; mühendisler Claude ve şirketin kendi ajan altyapısıyla ürün geliştiriyor.
+Ücret: aylık net 2.500–3.500 USD (Mid), 5.000–7.000 USD (Senior); TL karşılığı ödenir.
+
+Sorumluluklar: atanan ürünlerin geliştirme, test ve teslimini uçtan uca sahiplenmek; birden fazla ürün ve sektörde çalışmak; riskleri erken bildirmek; müşteri toplantılarına katılmak; kurulum, entegrasyon ve özelleştirmenin teknik sorumluluğu; dokümantasyon.
+
+Aranan
+- En az bir canlı, gösterilebilir ürün veya proje (linkle)
+- Veri, servis, arayüz ve deployment katmanlarını anlamak
+- AI ajan ve araçlarıyla geliştirip yayınlama deneyimi
+- Herhangi bir stack'te üretim deneyimi
+- En az bir şirkette tam zamanlı çalışma ve teslim geçmişi
+- Net yazılı iletişim
+
+Tercih: AI öncesi yazılım geliştirme, bulut/altyapı, kurumsal müşteri sunumları, kapalı ağ kurulumu, girişim deneyimi.

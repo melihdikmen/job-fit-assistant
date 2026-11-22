@@ -1,0 +1,12 @@
+Prometa AI — Senior AI Engineer
+İstanbul · Hybrid · Full-time
+
+AI solutions for retail, finance and travel (marketing, pricing, customer service, forecasting).
+
+Responsibilities: LLM engineering and agentic workflows, fine-tuning, production deployment (FastAPI, Flask, Docker), production-grade Python, performance optimization.
+
+Requirements
+- Master's in CS or related
+- 5+ years AI/ML/software with NLP, NLU, ML, image processing and/or LLM projects
+- Strong Python and PyTorch, Hugging Face Transformers
+- Translation, QA, summarization, intent detection, image processing apps in production

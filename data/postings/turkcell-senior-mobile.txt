@@ -1,0 +1,17 @@
+Turkcell — Senior Mobile Application Developer
+İstanbul, Türkiye · Hybrid · Tam Zamanlı
+
+Ne Bekliyoruz?
+- İlgili 4 yıllık bölümlerden mezun
+- iOS veya Android uygulama geliştirme konusunda en az 5 yıl deneyimli
+- Native mobil uygulama geliştirme dillerine hâkim, native frameworklere aşina
+- OOP ve design patterns tecrübesi
+- RESTful API entegrasyonu
+- Unit test, kod kalitesi ve performans optimizasyonu
+- Store süreçleri ve yayınlama tecrübesi
+- CI/CD (Jenkins, GitLab CI vb.)
+- Firebase, Google Analytics, Crashlytics
+- Scrum/Kanban bilgisi
+- İyi derecede İngilizce
+
+Rol: ürünün yazılım mimarisini ve yol haritasını belirlemek, iş birimlerinden gelen talepleri geliştirmek, kalite stratejisi, test otomasyonu, devreye alımda on-site ve on-call destek.

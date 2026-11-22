@@ -279,7 +279,18 @@ def test_dev_minimums_are_what_a_complete_set_leaves_after_the_split() -> None:
     dev, _ = split_postings(_postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_PER_LABEL))
 
     assert set(label_counts(dev).values()) == {MIN_DEV_PER_LABEL}
-    assert MIN_DEV_POSTINGS == MIN_POSTINGS - heldout_size(MIN_POSTINGS)
+    assert MIN_DEV_POSTINGS == MIN_POSTINGS - heldout_size(MIN_POSTINGS) - 1
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [(MIN_PER_LABEL, MIN_PER_LABEL, MIN_POSTINGS - 2 * MIN_PER_LABEL), (9, 6, 25), (13, 13, 14)],
+)
+def test_dev_part_of_a_complete_set_meets_the_dev_minimums(counts: tuple[int, int, int]) -> None:
+    """However a complete set is balanced, its dev part passes the check eval makes."""
+    dev, _ = split_postings(_postings(*counts))
+
+    assert check_coverage(dev, MIN_DEV_POSTINGS, MIN_DEV_PER_LABEL) == []
 
 
 @pytest.mark.parametrize(("count", "expected"), [(0, 0), (1, 0), (2, 1), (3, 1), (10, 3)])

@@ -1,0 +1,25 @@
+Orbislabs.ai — Agent Reliability Engineer (AI / LLM)
+Türkiye · Uzaktan · Tam Zamanlı
+
+Orbislabs AI Teknoloji A.Ş., bankacılık, sigortacılık, havacılık ve üretim gibi regüle sektörlere kurumsal AI ajan orkestrasyon platformu OrbisAgents'ı geliştiriyor (bulut ve on-premise, HITL, denetim izleri).
+
+Sorumluluklar
+- Ajanların kalite standartlarını ve canlıya çıkış kararlarını belirlemek
+- Eval tasarımı: deterministik kontroller, LLM-as-judge, insan incelemesi
+- Test framework'ü, golden dataset'ler, uç durum test suite'leri
+- Guardrail'ler: prompt injection, PII maskeleme, politika kontrolleri
+- Eval sonuçlarını CI/CD'ye entegre etmek
+- On-premise kurulum, versiyonlama, rollback
+- Observability, tracing, alarm; kalite/gecikme/maliyet takibi, drift tespiti
+
+Aranan Nitelikler
+- Bilgisayar Mühendisliği veya ilgili bölüm
+- 2–4 yıl yazılım deneyimi, en az 1 yılı üretimde LLM/ajan
+- Python yetkin, temel SQL
+- LLM değerlendirme (rubric, LLM-as-judge, golden dataset, regresyon)
+- LangSmith, Langfuse, Phoenix, DeepEval, Ragas, Promptfoo'dan en az biri
+- Guardrail bilgisi
+- CI/CD, Docker, Git
+- İyi derecede İngilizce
+
+Tercih: Kubernetes, vLLM/Ollama, LangGraph, MCP/A2A, Prometheus/Grafana, bankacılık/sigortacılık, KVKK/BDDK.

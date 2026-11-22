@@ -1,0 +1,22 @@
+Lucida AI — Forward Deployed Engineer
+Beşiktaş, İstanbul · On-site · Full-time
+
+Lucida is an AI language learning app used by millions in 130+ countries ($9M funding).
+
+We're looking for a bright, early-career Forward Deployed Engineer who learns fast and uses AI to build at speed.
+
+What You'll Do
+- Work across Product, Growth, Content and Operations
+- Build and ship features across mobile, backend and web
+- Build AI agents and automations
+- Improve quality, speed and cost of the AI tutor in production
+
+Requirements
+- 0–2 years of experience; new grads welcome
+- Strong programming fundamentals
+- Hands-on LLM experience (projects, hackathons, internships)
+- Daily use of AI coding tools
+- Comfortable in a fast-paced startup
+
+Nice to have: real-time voice/audio, subscription consumer apps, data pipelines, shipped side projects.
+Team works in English.

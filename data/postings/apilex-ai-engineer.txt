@@ -1,0 +1,16 @@
+Apilex — AI Engineer
+Şişli, İstanbul · On-site · Full-time
+
+AI-native legal operating system (France, Turkey, Germany), 120+ people, bootstrapped.
+
+Responsibilities
+- AI systems for legal reasoning and long-horizon tasks
+- Agentic systems that plan, use tools, manage state, recover from errors
+- Graph-based multi-agent orchestration, GraphRAG, knowledge graphs, ontologies
+- Model post-training: SFT, preference optimization, RL
+- Reward models, verifiers, evaluation benchmarks, regression suites
+- Inference infrastructure, latency and cost decisions
+
+Requirements
+- 5+ years building and operating AI/ML systems in production
+- Strong ML fundamentals and post-training experience

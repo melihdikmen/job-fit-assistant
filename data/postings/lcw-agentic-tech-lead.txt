@@ -1,0 +1,14 @@
+LC Waikiki — Agentic AI Development Tech Lead
+İstanbul · On-site · Full-time
+
+Digital Transformation & IT department (850+ people). Lead development of autonomous agents and multi-agent systems; shape AI architecture and standards; agentic coding and vibe coding culture.
+
+Requirements
+- CS/related degree
+- Strong software development + technical leadership
+- Advanced Python, FastAPI backend services
+- LLM / GenAI application development
+- At least one agentic framework (LangGraph, AutoGen, CrewAI, Semantic Kernel, Google ADK, Strands)
+- At least one LLM SDK (OpenAI Agents SDK, Anthropic Claude SDK, Gemini API)
+- RAG, vector DBs (Pinecone, Weaviate, Chroma, pgvector)
+- System design, API integrations, scalable backends

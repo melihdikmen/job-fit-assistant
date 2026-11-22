@@ -1,0 +1,13 @@
+Fly Work — Full Stack Developer
+Kartal, İstanbul · Hybrid · Tam Zamanlı
+
+Yapay zekâ destekli mobil uygulamalar ve oyunlar geliştiriyoruz. Ürün odaklı çalışıyoruz.
+
+Flutter ile iOS ve Android uygulamaları, Node.js ile backend, ürünlere AI entegrasyonu; oyun projeleri.
+
+Beklentiler
+- Flutter ve Dart ile mobil frontend geliştirmeye hâkim
+- Node.js ile backend, REST API ve servisler
+- Sunucu altyapısı ve deployment
+- AI entegrasyonları
+- Fikirden yayına uçtan uca sorumluluk

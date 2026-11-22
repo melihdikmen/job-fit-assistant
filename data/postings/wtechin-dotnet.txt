@@ -1,0 +1,14 @@
+WTECHIN Yazılım Bilişim ve Danışmanlık — Senior Software Engineer
+Ankara · İş yerinde · Tam Zamanlı
+
+Kurumsal ölçekte yürüttüğümüz projede görevlendirilmek üzere Kıdemli Yazılım Uzmanları arıyoruz.
+
+Görevler: büyük ölçekli kurumsal projelerde geliştirme/bakım, mikroservis mimarisi, .NET ile geliştirme, RESTful/WCF/XML web servisleri entegrasyonu, Stored Procedure/Function/Trigger/Transaction.
+
+Aranan
+- En az 4 yıl tecrübe
+- C#, ASP.NET WebForms, MVC, .NET Core, .NET Standard
+- Entity Framework, WCF, XML Web Servisleri
+- OOP, SOA, katmanlı mimari
+- HTML5, CSS3, jQuery, Bootstrap
+- Oracle, PostgreSQL veya MSSQL

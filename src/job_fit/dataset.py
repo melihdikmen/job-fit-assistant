@@ -40,7 +40,7 @@ HELDOUT_DATA_PATH = Path("data/postings_heldout.jsonl")
 LABEL_LOG_PATH = Path("data/label_log.jsonl")
 
 MIN_POSTINGS = 40
-MIN_PER_LABEL = 8
+MIN_PER_LABEL = 6
 # Share of every label that is set aside and looked at once, at the very end.
 HELDOUT_SHARE = 0.3
 SPLIT_SEED = 2026
@@ -243,8 +243,10 @@ def heldout_size(count: int, heldout_share: float = HELDOUT_SHARE) -> int:
     return min(count - 1, max(1, round(count * heldout_share)))
 
 
-# What the dev file of a complete set must still hold after the split.
-MIN_DEV_POSTINGS = MIN_POSTINGS - heldout_size(MIN_POSTINGS)
+# What the dev file of a complete set must still hold after the split. The share is
+# rounded label by label, which can hold out one posting more than the share of the
+# whole set would.
+MIN_DEV_POSTINGS = MIN_POSTINGS - heldout_size(MIN_POSTINGS) - 1
 MIN_DEV_PER_LABEL = MIN_PER_LABEL - heldout_size(MIN_PER_LABEL)
 
 

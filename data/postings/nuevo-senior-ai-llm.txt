@@ -1,0 +1,13 @@
+Nuevo Softwarehouse — Senior AI & LLM Engineer
+Türkiye · Uzaktan · Tam Zamanlı
+
+Müşterimizin görüntü işleme ve on-premise LLM ekipleri için.
+
+Aranılan
+- Minimum 7 yıl deneyim
+- YOLO, OpenCV, PyTorch
+- Transformers, Hugging Face, Fine-Tuning/SFT, Quantization
+- vLLM, Ollama
+- Python, FastAPI, Uvicorn, Nginx
+- SQL, SQLite
+- Model eğitiminden deployment'a uçtan uca tecrübe

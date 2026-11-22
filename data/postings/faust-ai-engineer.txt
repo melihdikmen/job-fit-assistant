@@ -1,0 +1,15 @@
+FAUST — AI Engineer
+Remote · Contract
+
+AI infrastructure for mobile game studios: personalized level design, difficulty and monetization.
+
+Role: own ML and Reinforcement Learning systems, applied research.
+
+Requirements
+- CS / AI / Math degree (MSc a plus)
+- 2–5 years in AI/ML
+- Solid ML and RL concepts and algorithms
+- Research or AI/ML project experience
+- Interest in gaming
+
+Self-funded startup; equity after upcoming round.

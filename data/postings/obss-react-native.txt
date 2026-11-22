@@ -1,0 +1,17 @@
+OBSS — React Native Developer
+İstanbul, Türkiye · Hybrid · Tam Zamanlı
+
+OBSS is Turkey's largest technology consultancy (offices in London, Istanbul and Ankara; 1000+ people), serving banking and finance, insurance, e-commerce, retail and startups. We are looking for a React Native Developer to contribute to delivering end-to-end software payment solutions across diverse industries.
+
+Qualifications / Technical Skills
+- Computer Engineering degree
+- Minimum 4 years of experience in a React Native role
+- Experience in mobile application development processes and performance optimization
+- Banking industry experience is a must
+- Knowledge of UX and Mobile Design Patterns
+- Web services / REST APIs
+- Proficiency in JavaScript and/or TypeScript
+- Good team player, result oriented, analytical mind
+- Strong communication and interpersonal skills
+
+Benefits: competitive salary, flexible and hybrid working, Individual Growth Program, trainings and certifications.

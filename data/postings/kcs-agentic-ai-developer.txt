@@ -1,0 +1,15 @@
+KCS iT — Agentic AI Developer
+Türkiye · Remote · B2B contract · Senior
+
+Must-have
+- 8–12 years in software, platform or data solution development
+- At least 3 years delivering AI/LLM solutions into production
+- Hands-on Microsoft 365 Copilot and Copilot Studio (declarative and custom agents, Graph connectors)
+- Generative AI and RAG (chunking, embeddings, grounding, hallucination control)
+- Azure AI Search, Azure OpenAI / AI Foundry
+- SharePoint Online architecture, Power Platform (Power Automate, Power Apps, Dataverse)
+- AWS (S3, Lambda, API Gateway), awareness of Bedrock and Kendra
+- Agile, distributed multi-vendor teams
+
+Nice to have: SPFx, React, TypeScript; knowledge graphs.
+Projects mainly for clients in Benelux. Working language English.

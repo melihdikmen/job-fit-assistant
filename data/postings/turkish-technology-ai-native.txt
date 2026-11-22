@@ -1,0 +1,19 @@
+Turkish Technology — AI Native Software Developer
+İstanbul, Türkiye · Hybrid · Tam Zamanlı
+
+This role adopts an "AI-native" approach: from analyzing business unit needs to delivering end-to-end software, actively using AI tools (Cursor, Copilot, Claude, etc.).
+
+Responsibilities
+- Business analysis and process design with business units and stakeholders
+- Integrate AI coding agents and LLM tools into daily development for rapid PoCs and production-grade software
+- Technical design: API integrations, database structures, microservices; ensure AI-generated code follows architecture and security standards
+- Remove the hand-off time between analysis and coding
+
+Requirements
+- Bachelor's in software/computer engineering or related
+- OOP, RESTful API design, SQL/NoSQL, Git
+- Active use of AI tools (Cursor, Copilot, Claude, ChatGPT) for development, debugging, refactoring
+- Analytical thinking, business analysis, MVP mindset
+- Strong written and verbal communication
+
+Preferred: AI-driven development in large codebases, interest in UX and product management.

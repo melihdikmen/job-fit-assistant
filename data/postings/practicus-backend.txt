@@ -1,0 +1,18 @@
+Practicus AI — Software Engineer, Backend / Product Engineering
+Türkiye · Remote · Full-time · Mid/Senior
+
+Seattle-based startup building a unified GenAI and data intelligence platform for enterprises.
+
+Primary focus: Python backend services, REST APIs, asynchronous processing, distributed systems, AI-powered applications (LLM integrations, agents, model APIs).
+
+Required
+- Strong Python (OOP, design principles, clean code)
+- Backend applications, RESTful APIs, service-oriented architectures
+- SQL, PostgreSQL, data modeling
+- Async programming, concurrency, distributed design
+- Automated testing, debugging, performance, production maintenance
+- AuthN/AuthZ, API security
+- Git, code reviews
+- Active use of AI coding tools while keeping responsibility for quality
+
+Working language English.
