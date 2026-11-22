@@ -2,6 +2,12 @@
 
 Costs use list prices per token, even when credits pay.
 
+> **Week 1 and Week 2.** The sections "Model comparison (Phase 3)" and "Workflow vs. agent
+> (Phase 4)" were measured on the Week 1 set of 21 postings. In Week 2 the set grew to 40
+> postings with labels confirmed by the candidate and was split into a dev and a held-out
+> part. The current numbers are in "Week 2 reference (Phase 7)" at the end; the two parts
+> are not comparable.
+
 > **Note (2026-11-11, after all runs below).** A code review in Phase 5 changed the
 > location rule in `rules.py`: names are matched as whole words, a location that names
 > no place (`Fully remote`, `Not specified`, the country alone) is treated as unknown,
@@ -228,3 +234,202 @@ An agent would become the right choice if the task grew steps that depend on eac
 other: looking up the company, fetching a posting from a URL, comparing against earlier
 applications, or asking me a question when the posting is unclear. Until then the fixed
 workflow stays the version I use.
+
+## Week 2 reference (Phase 7)
+
+Runs of 2026-11-22 on the **dev set**: 27 postings (APPLY 6, PREPARE 4, SKIP 17), dataset
+SHA-256 `02f2239aa4ad…`, Vertex AI location `global`, one call at a time. Workflow prompt
+SHA-256 `5401d5edd350…`, agent prompt SHA-256 `e71ed0536d15…` (both hashes now cover the
+schema field descriptions), CV SHA-256 `aab1b80bd000…`. Each configuration was run three
+times. No call failed and no answer needed a schema retry in any of the 12 runs.
+
+These numbers are not comparable with the Week 1 sections above: the set, the labels,
+the location rule and the hash definition all changed.
+
+### The set and its labels
+
+- 40 postings: the 21 of Week 1 plus 19 new ones. APPLY 9, PREPARE 6, SKIP 25.
+- **How the labels were made.** Every label started as a suggestion written by Claude.
+  The candidate went through all 40 postings with the suggestion on screen and
+  confirmed or changed each one. 5 of 40 were changed, all among the new postings (four
+  PREPARE became SKIP, one SKIP became PREPARE); Cohen's kappa between suggested and
+  confirmed labels is 0.78. The labels are the candidate's decision, but they are not
+  independent of the suggestions. PROCESS.md asked for labels made without them.
+- Split by a seeded shuffle within each label, not by hand: dev 27, held-out 13
+  (APPLY 3, PREPARE 2, SKIP 8). **The held-out set has not been run.** It is evaluated
+  once, at the end of Phase 11.
+- Posting texts are condensed (370 to 3,500 characters), as in Week 1.
+
+### Reference table
+
+Generated with `uv run python -m job_fit.compare --table reference <run files>`. Values
+are the mean ± the sample standard deviation over the three runs.
+
+| Configuration | Runs | Accuracy | Weighted error (mean) | APPLY recall | Kappa | Cost per 100 postings | Avg. latency | Judge score |
+|---|---|---|---|---|---|---|---|---|
+| Baseline (always SKIP) | – | 63.0% | 0.96 | 0.0% | 0.00 | $0.00 | 0.0 s | – |
+| gemini-2.5-flash (reasoning on) | 3 | 65.4% ± 2.1% | 0.51 ± 0.06 | 44.4% ± 9.6% | 0.37 ± 0.04 | $0.62 | 11.4 s | 4.63 |
+| gemini-2.5-flash (reasoning off) | 3 | 60.5% ± 2.1% | 0.40 ± 0.02 | 44.4% ± 9.6% | 0.38 ± 0.02 | $0.16 | 2.7 s | 4.48 |
+| gemini-3.1-flash-lite | 3 | 55.6% ± 0.0% | 0.44 ± 0.00 | 50.0% ± 0.0% | 0.32 ± 0.00 | $0.10 | 1.9 s | 4.11 |
+| gemini-2.5-flash (agent, reasoning on) | 3 | 67.9% ± 5.7% | 0.35 ± 0.08 | 72.2% ± 9.6% | 0.48 ± 0.09 | $0.74 | 14.3 s | 4.41 |
+
+The judge score is from `gemini-3.1-pro-preview` on run 3 of each configuration; see
+"Judge" below before reading anything into it.
+
+Range of the mean weighted error over the three runs: workflow with reasoning on 0.44
+to 0.56, reasoning off 0.37 to 0.41, Flash-Lite 0.44 in every run, agent 0.26 to 0.41.
+
+**Noise figure: 0.077.** That is the largest standard deviation of the mean weighted
+error among the configurations (the agent's). A difference between two configurations
+that is smaller than this is not evidence of an improvement. Phase 11 uses it as its
+keep-or-roll-back threshold.
+
+### Precision and recall per class
+
+Means over the three runs. Recall: of the postings that deserve a decision, the share
+that got it. Precision: of the postings given a decision, the share that deserved it.
+
+| Configuration | APPLY recall / precision | PREPARE recall / precision | SKIP recall / precision |
+|---|---|---|---|
+| Workflow, reasoning on | 44% / 47% | 42% / 31% | 78% / 83% |
+| Workflow, reasoning off | 44% / 62% | 58% / 20% | 67% / 100% |
+| Workflow, Flash-Lite | 50% / 43% | 50% / 20% | 59% / 100% |
+| Agent, reasoning on | 72% / 65% | 58% / 30% | 69% / 95% |
+
+PREPARE has 4 postings on dev, so its recall moves in steps of 25 points; its row says
+little. APPLY has 6, one posting is 17 points.
+
+### What the numbers say
+
+- **Accuracy barely separates anything from the baseline; kappa does.** "Always SKIP"
+  is right on 63.0% of this set. The workflow with reasoning on reaches 65.4%, about
+  half a posting more, and the two cheap configurations are below the baseline. By
+  accuracy the model looks useless. Kappa removes what the label mix gives for free:
+  the baseline scores exactly 0, and every configuration is between 0.32 and 0.48. The
+  workflow with reasoning off has lower accuracy than the baseline (60.5%) and the same
+  kappa as the workflow with reasoning on (0.38 and 0.37).
+- **Only one configuration makes the expensive mistake.** The workflow with reasoning
+  on rated an APPLY posting as SKIP 5 times in three runs and a PREPARE posting as
+  SKIP 3 times. The agent did the second twice and the first never; the two cheap
+  configurations did neither. That is the whole reason the workflow with reasoning on
+  has the worst weighted error.
+- **The agent has the best weighted error and the best APPLY recall.** Its range of
+  weighted error (0.26 to 0.41) does not overlap with that of the workflow with
+  reasoning on (0.44 to 0.56), and the difference of the means, 0.16, is twice the
+  noise figure. Against the workflow with reasoning off (0.40) the agent's lead is
+  0.05, inside the noise: a tie.
+- **The cheap configurations hedge.** With reasoning off, 17 of the 22 errors in three
+  runs are SKIP postings rated PREPARE, and PREPARE precision is 20%: four of five
+  "prepare" answers are for jobs to ignore. That is cheap in the cost matrix and a
+  nuisance in use.
+- **The agent is the least stable.** 8 of 27 predictions changed between its runs,
+  against 5 and 6 for the workflow with reasoning on and off and 0 for Flash-Lite,
+  whose three runs are identical. The agent's accuracy ranged from 63.0% to 74.1%.
+- **Rules.** The location rule fired on one posting per run and the seniority rule on
+  two. They changed 2 outcomes in three runs with reasoning on, 6 with reasoning off,
+  5 on Flash-Lite and none for the agent.
+- **The agent still does not explore.** `check_rules` once per posting (27 of 27 in
+  every run, its answer equal to the rules applied in code every time);
+  `get_cv_section` 59 to 62 times per run, for `experience` and `skills` on every
+  posting, `summary` on 17 of 81 and `education` on 3, never `projects`;
+  `convert_currency` 4 to 6 times; 3.6 model calls per posting.
+- **Three postings are wrong in every run of every configuration:** Miny (label APPLY)
+  and Fuzul mobile architecture and Turkcell senior mobile (label SKIP). Either the
+  prompt has a blind spot all four share, or these labels are the debatable ones.
+
+### Does the cost matrix decide the ranking?
+
+Generated with `uv run python -m job_fit.compare --table costs <run files>`. Mean
+weighted error with the cost of a missed good job (APPLY rated SKIP) set to 3, 2 and 5;
+the predictions are the same, only their price changes.
+
+| Configuration | missed APPLY = 3 (default) | missed APPLY = 2 | missed APPLY = 5 |
+|---|---|---|---|
+| gemini-2.5-flash (reasoning on) | 0.51 (rank 4) | 0.44 (rank 3) | 0.63 (rank 4) |
+| gemini-2.5-flash (reasoning off) | 0.40 (rank 2) | 0.40 (rank 2) | 0.40 (rank 2) |
+| gemini-3.1-flash-lite | 0.44 (rank 3) | 0.44 (rank 3) | 0.44 (rank 3) |
+| gemini-2.5-flash (agent, reasoning on) | 0.35 (rank 1) | 0.35 (rank 1) | 0.35 (rank 1) |
+
+No. The best configuration is the same under all three matrices. Three of the four
+rows do not move at all, because those configurations never miss an APPLY; only the
+workflow with reasoning on does, and it is last or tied for third whatever a miss costs.
+
+### Judge
+
+A second model, `gemini-3.1-pro-preview`, rated the rationale of every decision in run
+3 of each configuration (108 rationales, none failed) against a written rubric: names
+matching skills, names missing skills, reflects the hard rules that fired, mentions
+the English risk, consistent with the decision, and an overall score from 1 to 5. It
+saw the posting, the CV, both decisions and the fired rules, but not the label.
+
+| Configuration | Mean score | Matching skills | Missing skills | Hard rules | English risk | Consistent |
+|---|---|---|---|---|---|---|
+| Workflow, reasoning on | 4.63 | 100% | 93% | 100% | 93% | 100% |
+| Workflow, reasoning off | 4.48 | 96% | 85% | 100% | 96% | 96% |
+| Workflow, Flash-Lite | 4.11 | 96% | 67% | 100% | 93% | 100% |
+| Agent, reasoning on | 4.41 | 96% | 96% | 100% | 96% | 100% |
+
+**The judge was checked against the candidate and did not pass.** The candidate scored
+10 rationales of the workflow with reasoning on, by the same rubric, before seeing the
+judge's scores:
+
+| | Result |
+|---|---|
+| Same score | 4 of 10 |
+| Within one point | 7 of 10 |
+| Mean absolute difference | 1.2 points |
+| Judge minus candidate, mean | +0.6 points |
+
+Three pairs are three points apart (candidate 2, judge 5, twice; candidate 5, judge 2,
+once). The judge is also lenient: it gave 5 to 21 of 27 rationales of that run. So the
+judge score is **reported, not trusted**: it is not used to rank configurations here
+and must not become a keep-or-roll-back criterion in Phase 11 unless the rubric or the
+judge is changed and the check repeated. Ten rationales are too few to say why the two
+disagree. The "hard rules" criterion is 100% everywhere by construction: the rule note
+is appended by code, so that line of the rubric measures the program, not the model.
+
+`gemini-4-carbon` was the planned judge. On the evening of the runs it answered
+"resource exhausted" for nearly every call, so the judge was changed (decision D47 in
+PLAN.md).
+
+### Observability
+
+Every model call of the 12 runs and of the judge pass was traced to Langfuse (cloud, EU
+region) with prompt, output, tokens, latency, cost and model, tagged by experiment
+(`week2-ref-…`), version and run number. The CV is replaced by a hash marker in every
+trace; this was checked on a stored trace, which held none of the CV's 77 maskable
+lines. Posting texts and the model's rationales are traced as they are.
+
+### How much to trust this
+
+- 27 postings and three runs per configuration. The standard deviations are computed
+  from three values; they show the order of magnitude of the noise, not its exact size.
+- The labels were confirmed with the suggested label on screen (see above).
+- PREPARE: 4 postings on dev. Nothing here supports a statement about that class.
+- The agent and the workflow differ in prompt and in how much of the CV they read, as
+  in Week 1; the agent's better result cannot be credited to tool calling as such.
+- Prices are Vertex AI list prices, Global, standard tier, read on 2026-11-22. Spend at
+  list price: about $1.30 for the 12 runs and $1.95 for the judge, trials included.
+- Latency was measured once per posting from one home connection.
+
+### What this means for the Week 1 conclusions
+
+_Drafted by Claude from the numbers above. Not yet confirmed by the candidate._
+
+The Week 1 choice, the fixed workflow on `gemini-2.5-flash` with reasoning on, does not
+hold up on this set. It has the worst weighted error of the four configurations, by
+more than the noise, and it is the only one that throws away good jobs, which is the
+mistake the cost matrix was built to punish. Week 1 said "no agent" because the agent
+added cost and instability without accuracy. On the larger set the agent is still the
+least stable and still the most expensive, but it finds 72% of the APPLY postings
+against 44% and never rated one of them SKIP in three runs.
+
+That is not yet a reason to switch. Week 1 already suspected that the agent's
+advantage comes from its prompt and its narrower view of the CV, not from tool
+calling, and nothing measured here separates those. The workflow with reasoning off
+gets within noise of the agent's weighted error at a fifth of the price and a fifth of
+the latency, by hedging into PREPARE. So the open question for the next phases is
+narrow: why does the workflow with reasoning on talk itself into SKIP, and can a change
+to it (Phase 8: fewer decisions left to the model; Phase 11: one guarded prompt change
+at a time) remove that mistake without the agent loop? The held-out set stays closed
+until that work is done.

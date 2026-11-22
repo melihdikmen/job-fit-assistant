@@ -241,11 +241,54 @@ def test_failed_call_is_recorded_not_raised() -> None:
     fake = FakeJudgeLLM(LLMError("429"), _score_json(3))
     items = [_item("p-1"), _item("p-2")]
 
-    records = judge_items(items, {"p-1": POSTING, "p-2": POSTING}, CV, model=JUDGE_MODEL, llm=fake)
+    records = judge_items(
+        items, {"p-1": POSTING, "p-2": POSTING}, CV, model=JUDGE_MODEL, llm=fake, call_retries=0
+    )
 
     assert records[0].score is None
     assert "429" in records[0].error
     assert records[1].score is not None
+
+
+def test_failed_call_is_retried_after_a_pause() -> None:
+    """A call that fails with a provider error is tried again; the pause is not skipped."""
+    fake = FakeJudgeLLM(LLMError("429"), LLMError("429"), _score_json(4))
+    pauses: list[float] = []
+
+    records = judge_items(
+        [_item("p-1")], {"p-1": POSTING}, CV, model=JUDGE_MODEL, llm=fake, sleep=pauses.append
+    )
+
+    assert records[0].score is not None
+    assert records[0].error == ""
+    assert pauses == [judge.RETRY_WAIT_S] * 2
+
+
+def test_call_that_keeps_failing_is_given_up_after_the_retries() -> None:
+    """The retries are bounded; the last error is what gets recorded."""
+    fake = FakeJudgeLLM(LLMError("429"))
+    pauses: list[float] = []
+
+    records = judge_items(
+        [_item("p-1")], {"p-1": POSTING}, CV, model=JUDGE_MODEL, llm=fake, sleep=pauses.append
+    )
+
+    assert records[0].score is None
+    assert len(fake.calls) == judge.CALL_RETRIES + 1
+    assert len(pauses) == judge.CALL_RETRIES
+
+
+def test_invalid_answer_is_not_retried_as_a_failed_call() -> None:
+    """An answer that stays invalid was already retried once; it is not paused for."""
+    fake = FakeJudgeLLM("not json")
+    pauses: list[float] = []
+
+    judge_items(
+        [_item("p-1")], {"p-1": POSTING}, CV, model=JUDGE_MODEL, llm=fake, sleep=pauses.append
+    )
+
+    assert pauses == []
+    assert len(fake.calls) == judge.MAX_ATTEMPTS
 
 
 def test_item_without_a_posting_text_is_an_error() -> None:
@@ -452,7 +495,8 @@ def test_calibration_agreement_compares_only_items_scored_by_both(tmp_path: Path
     """Unscored items and items the judge failed on are left out of the comparison."""
     run_file = _write_run(tmp_path, _result("a"), _result("b"), _result("c"))
     fake = FakeJudgeLLM(_score_json(4), _score_json(2), LLMError("boom"))
-    judge_run_file(run_file, {"a": POSTING, "b": POSTING, "c": POSTING}, CV, llm=fake)
+    texts = {"a": POSTING, "b": POSTING, "c": POSTING}
+    judge_run_file(run_file, texts, CV, llm=fake, sleep=lambda seconds: None)
     name = run_file.as_posix()
     calibration = [
         CalibrationItem(run_file=name, id="a", human_score=4),

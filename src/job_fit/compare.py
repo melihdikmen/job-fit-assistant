@@ -488,6 +488,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "costs: the ranking under three cost matrices.",
     )
     args = parser.parse_args(argv)
+    # The tables use "±" and "–", which the default Windows console encoding cannot print.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     try:
         reports = load_runs(args.runs)
         rows = rows_from_reports(reports)

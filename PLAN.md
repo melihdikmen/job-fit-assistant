@@ -11,7 +11,7 @@
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
-| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 (code and 479 tests, tracing verified live, no eval run yet); waiting for the candidate: labels (`dataset label --show-suggestion`, D45) and rubric approval |
+| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 ; reference on dev (27 postings, 3 runs each): workflow reasoning on 65.4% / w.err 0.51 / kappa 0.37, agent 67.9% / 0.35 / 0.48, noise figure 0.077; judge failed its check (4 of 10 exact); 485 tests. Open: candidate confirms the conclusion draft in `docs/results.md`; push |
 | 8 – Agent architecture | ⬜ | | roadmap only |
 | 9 – RAG, MCP, memory | ⬜ | | roadmap only |
 | 10 – Durable state & HITL | ⬜ | | roadmap only |
@@ -173,6 +173,25 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   label is marked `saw_suggestion` in `data/label_log.jsonl`, and `docs/results.md`
   must say that the labels were confirmed with the suggestion on screen, not given
   independently.
+
+- D46 (2026-11-22): the per-class minimum is **6**, not 8 (changes D39). After the
+  candidate's labeling PREPARE has 6 postings; the candidate chose to go on rather
+  than collect two more. PROCESS.md's own minimum of 5 is met. The dev set has 4
+  PREPARE postings and the held-out set 2, so PREPARE recall moves in steps of 25
+  points on dev and nothing firm can be said about that class.
+- The candidate approved the judge rubric (`RUBRIC` in `judge.py`) as drafted on
+  2026-11-22.
+
+- D47 (2026-11-22, Claude's choice, changes D41): the judge is
+  `gemini-3.1-pro-preview`, not `gemini-4-carbon`. On the evening of 2026-11-22
+  `gemini-4-carbon` and `gemini-4-argon` answered 429 "resource exhausted" for nearly
+  every call in `global`, the only location that serves them; one judge call in
+  eleven went through. D41's fallback, `gemini-3.1-flash-lite`, is one of the judged
+  configurations and cannot judge its own run. `gemini-3.1-pro-preview` answers, is not
+  a decider, and costs 2.00 / 12.00 per 1M tokens (pricing page, standard tier,
+  2026-11-22): about $0.018 and 13 s per rationale on a 3-rationale trial, about $2 for
+  the pass, inside the $3 ceiling of the plan. The candidate was told in the chat and
+  can reverse it; the judge files name the model that produced them.
 
 ## What the candidate does (Claude cannot)
 
@@ -1373,13 +1392,13 @@ not a dependency; Docker is installed (29.9.2) on a machine with 7.8 GB RAM;
 These are the parts only the candidate can do. Steps 1–8 need none of them.
 
 - [x] Answer D38–D44 (all decided as proposed, see Decided) and approve this plan.
-- [ ] **Relabel all 21 postings yourself**, with `dataset relabel` (step 3): it shows
+- [x] **Relabel all 21 postings yourself** (done as quick confirmation, D45), with `dataset relabel` (step 3): it shows
       the posting text only, not the old label and not any model output. Claude does
       not suggest labels this time; that is the point of the task.
-- [ ] **Collect at least 19 new postings** (40 or more in total) and label each one
+- [x] **Collect at least 19 new postings** (40 or more in total) and label each one
       before any model sees it. Include more PREPARE cases (D39) and hard cases: a good
       stack in a blocked city, a junior role with a matching stack, no location given.
-- [ ] Edit or approve the judge rubric that Claude drafts (step 5), then **score 10
+- [x] Edit or approve the judge rubric that Claude drafts (step 5), then **score 10
       rationales yourself**, 1–5, before seeing the judge's scores.
 - [x] Create a Langfuse project and put its keys into `.env` (D42).
 - [ ] Budget alert in the Google Cloud console, still open from Phase 3.
@@ -1448,17 +1467,17 @@ These are the parts only the candidate can do. Steps 1–8 need none of them.
        the three cost matrices.
 8. [x] Tests for all of the above (no network, no real LLM, fake judge, fake tracer),
        then `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`.
-9. [ ] Dataset in place: the candidate's relabeling and new postings; `dataset check`;
+9. [x] Dataset in place: the candidate's relabeling and new postings; `dataset check`;
        `dataset split`; commit the three data files.
-10. [ ] Live runs on the dev set, sequential: a `--limit 2` smoke run with tracing on,
+10. [x] Live runs on the dev set, sequential: a `--limit 2` smoke run with tracing on,
         then 3 runs of each configuration of D40, then the judge (D41), then the
         calibration comparison.
-11. [ ] `docs/results.md`: a new "Week 2 reference" section with the new columns, the
+11. [x] `docs/results.md`: a new "Week 2 reference" section with the new columns, the
         noise figure, the cost-matrix check, the label-agreement figure from the
         relabeling, the judge check, and what kappa shows that accuracy did not. The
         Week 1 tables stay, marked as the old set. The candidate edits or approves the
         conclusions.
-12. [ ] `README.md` (what now leaves the machine: traces), `AGENTS.md` (held-out rule,
+12. [~] `README.md` (what now leaves the machine: traces), `AGENTS.md` (held-out rule,
         new commands, lessons), record results here, commit
         `phase-7: evals and observability`; push after the pre-push check and the
         candidate's go-ahead.
@@ -1506,6 +1525,21 @@ Caveat for the results: the candidate had seen the suggested list before labelin
 the labels are the candidate's decision but not an independent one. If the suggested
 counts hold, the set has APPLY 9, PREPARE 9, SKIP 22, which meets D39.
 
+**Labeling outcome (step 9, 2026-11-22).** The candidate went through all 40 postings
+with `dataset label --show-suggestion` (D45). 5 labels differ from the suggestions, all
+among the 19 new postings: four PREPARE suggestions became SKIP and one SKIP became
+PREPARE; kappa between suggested and confirmed labels is 0.78. The 21 Week 1 labels
+were all confirmed unchanged, including the three PROCESS.md calls doubtful (Miny,
+a1mobile, Rubikpara). Final set: APPLY 9, PREPARE 6, SKIP 25. Split (seed 2026): dev 27
+(APPLY 6, PREPARE 4, SKIP 17), held-out 13 (APPLY 3, PREPARE 2, SKIP 8). The majority
+baseline on dev is "always SKIP" at 63.0% accuracy.
+
+The dev minimum became 27 postings: the held-out share is rounded per label, which can
+hold out one posting more than 30% of the whole set.
+
+**Smoke run (step 10).** `eval --limit 2` on the dev set with tracing on ran end to end
+(report with precision, recall, kappa, alternative matrices; run file; traces).
+
 **Deviations from the plan above**
 - One command, `dataset label --source <file>`, serves both the relabeling of the old
   set and the labeling of new rows; the plan named it `relabel`.
@@ -1545,6 +1579,59 @@ uv run python -m job_fit.dataset label --show-suggestion --source data/postings.
 uv run python -m job_fit.dataset check
 uv run python -m job_fit.dataset split
 ```
+
+### Live results (steps 10–11, 2026-11-22)
+
+Dev set, 27 postings (dataset SHA-256 `02f2239aa4ad…`), Vertex AI `global`, three runs
+per configuration, no failed call and no schema retry. Workflow prompt SHA-256
+`5401d5edd350…`, agent prompt `e71ed0536d15…`. Run, summary and judge files are in
+`data/results/` (git-ignored), named `2026-11-22_…`. Full discussion:
+`docs/results.md`, "Week 2 reference (Phase 7)".
+
+| Configuration | Accuracy | Weighted error (mean), range | APPLY recall | Kappa | Cost per 100 | Latency | Predictions that changed between runs |
+|---|---|---|---|---|---|---|---|
+| Baseline (always SKIP) | 63.0% | 0.96 | 0% | 0.00 | – | – | – |
+| Workflow, flash, reasoning on | 65.4% ± 2.1% | 0.51 ± 0.06, 0.44–0.56 | 44% ± 10% | 0.37 ± 0.04 | $0.62 | 11.4 s | 5 of 27 |
+| Workflow, flash, reasoning off | 60.5% ± 2.1% | 0.40 ± 0.02, 0.37–0.41 | 44% ± 10% | 0.38 ± 0.02 | $0.16 | 2.7 s | 6 of 27 |
+| Workflow, flash-lite | 55.6% ± 0.0% | 0.44 ± 0.00 | 50% ± 0% | 0.32 ± 0.00 | $0.10 | 1.9 s | 0 of 27 |
+| Agent, flash, reasoning on | 67.9% ± 5.7% | 0.35 ± 0.08, 0.26–0.41 | 72% ± 10% | 0.48 ± 0.09 | $0.74 | 14.3 s | 8 of 27 |
+
+- **Noise figure: 0.077** (largest standard deviation of mean weighted error). This is
+  the keep-or-roll-back threshold Phase 11 inherits.
+- Cost-matrix check: the ranking is the same with a missed APPLY priced at 2, 3 or 5.
+  Only the workflow with reasoning on ever rates an APPLY as SKIP (5 times in 3 runs).
+- Judge (`gemini-3.1-pro-preview`, D47), run 3 of each configuration, 108 rationales:
+  mean scores 4.63 / 4.48 / 4.11 / 4.41 in table order. Check against the candidate's
+  10 scores: 4 exact, 7 within one point, mean absolute difference 1.2, judge 0.6
+  points more lenient. **The judge did not pass the check**; its score is reported and
+  must not be used as a criterion in Phase 11 as it stands.
+- Spend at list price: about $1.30 for the 12 runs, $1.95 for the judge with its
+  trials, a few cents for smoke runs and probes.
+
+### Findings to carry into Phase 8
+
+- The Week 1 conclusions are open again. On this set the chosen configuration
+  (workflow, reasoning on) is the worst on weighted error and the agent the best, by
+  twice the noise figure; the workflow with reasoning off is within noise of the agent
+  at a fifth of the cost. A draft of what this means is at the end of
+  `docs/results.md`, **not yet confirmed by the candidate**.
+- The one thing to explain is why the workflow with reasoning on talks itself into
+  SKIP for good jobs. The agent prompt and the reasoning-off workflow do not.
+- Miny (APPLY), Fuzul mobile architecture (SKIP) and Turkcell senior mobile (SKIP) are
+  wrong in all 12 runs: a shared blind spot or debatable labels.
+- The agent's tool use is as fixed as in Week 1: `check_rules` once per posting and
+  always equal to the code, `experience` and `skills` on every posting, never
+  `projects`.
+- Labels were confirmed with the suggestion on screen (D45); PREPARE has 4 dev
+  postings (D46). Both limit what any later phase can claim.
+- `gemini-4-carbon` and `gemini-4-argon` were out of capacity in `global` on the
+  evening of the runs. A phase that depends on one model needs a fallback that is not
+  one of the models under test.
+- The judge disagrees with the candidate on 3 of 10 rationales by three points. Before
+  it is used again: read those three together with the candidate, fix the rubric or
+  the judge prompt, repeat the check on a fresh sample.
+- Glob patterns such as `*_run-*.json` also match `*.judge.json`; pass run files to
+  `compare` explicitly.
 
 **Done when:** one command prints per-class precision and recall, kappa, mean ± spread
 over 3 runs and the judge score, and the table in `docs/results.md` has these columns.

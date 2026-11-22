@@ -31,10 +31,10 @@ in code and override the LLM. It measures accuracy, cost and latency on a labele
 
 ## Lessons learned
 Each line: what went wrong → the rule that prevents it.
-- Heredocs with apostrophes fail in the Bash tool, and there is no bare `python` → write scripts with the file tool, run them with `uv run python`.
-- `load_dotenv()` searches from the calling file, not the working directory → a script outside the repo must pass the `.env` path.
+- Heredocs with apostrophes fail in the Bash tool, there is no bare `python`, and `load_dotenv()` searches from the calling file → write scripts with the file tool, run them with `uv run python`, pass the `.env` path from outside the repo.
 - A test expectation computed by hand was wrong → derive expected values from the constants (`ERROR_COSTS`) and run the test before trusting it.
 - A model listed for the project still returned 404 → probe a model with one call, and read prices from the pricing page, before planning a run.
 - Two eval runs were cut off by a quota → an aborted run is repeated or reported as "not run", never patched together.
-- One agent run scored 85.7%, the next 61.9% → on 21 postings one run is not a result; repeat it, and treat one posting of difference as noise.
+- One agent run scored 85.7%, the next 61.9% → run a configuration 3 times (`--runs 3`); a difference below the noise figure in `docs/results.md` is not an improvement.
+- The judge model gave the same score as the candidate on 4 of 10 rationales → check a judge against human scores first; an unchecked judge score decides nothing.
 - Tuning a prompt against the test set fits it and breaks comparability → no change to prompts, schema or tool descriptions without re-running every compared row.

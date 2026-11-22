@@ -50,6 +50,10 @@ PRICES_USD_PER_MILLION_TOKENS: dict[tuple[str, str], ModelPrice] = {
     ("vertex", "gemini-3.1-flash-lite"): ModelPrice(
         input_usd_per_million=0.25, output_usd_per_million=1.50
     ),
+    # Used as the rationale judge. Standard tier, prompts of 200k tokens or less.
+    ("vertex", "gemini-3.1-pro-preview"): ModelPrice(
+        input_usd_per_million=2.00, output_usd_per_million=12.00
+    ),
     ("openrouter", "nvidia/nemotron-3.5-super-vl:free"): FREE,
     ("openrouter", "liquid/lfm-3-1.7b:free"): FREE,
 }

@@ -17,6 +17,7 @@ import hashlib
 import json
 import random
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,12 +36,20 @@ from job_fit.workflow import DEFAULT_CV_PATH, DEFAULT_PROVIDER
 LLMCall = Callable[..., LLMResponse]
 AskFn = Callable[[str], str]
 ShowFn = Callable[[str], None]
+SleepFn = Callable[[float], None]
 ProgressFn = Callable[[int, int, "JudgeRecord"], None]
 
-DEFAULT_JUDGE_MODEL = "gemini-4-carbon"
-# The strong model thinks for a long time; one posting took over three minutes in Phase 3.
+# A strong model that is not one of the models being judged. gemini-4-carbon was the
+# first choice, but it answered "resource exhausted" for most calls on 2026-11-22.
+DEFAULT_JUDGE_MODEL = "gemini-3.1-pro-preview"
+# A strong model can think for a long time; one posting took over three minutes in Phase 3.
 JUDGE_TIMEOUT_S = 300.0
 MAX_ATTEMPTS = 2
+# The strong model answers "resource exhausted" in bursts; a rationale whose call failed
+# is tried again after a pause instead of being left unrated.
+CALL_RETRIES = 4
+RETRY_WAIT_S = 30.0
+LLM_ERROR_PREFIX = "LLMError: "
 JUDGE_EXPERIMENT = "judge"
 JUDGE_FILE_SUFFIX = ".judge.json"
 
@@ -301,7 +310,7 @@ def judge_rationale(
                 timeout_s=timeout_s,
             )
         except LLMError as err:
-            error = f"LLMError: {err}"
+            error = f"{LLM_ERROR_PREFIX}{err}"
             break
         input_tokens += response.input_tokens
         output_tokens += response.output_tokens
@@ -337,6 +346,9 @@ def judge_items(
     timeout_s: float = JUDGE_TIMEOUT_S,
     llm: LLMCall | None = None,
     on_progress: ProgressFn | None = None,
+    call_retries: int = CALL_RETRIES,
+    retry_wait_s: float = RETRY_WAIT_S,
+    sleep: SleepFn = time.sleep,
 ) -> list[JudgeRecord]:
     """Rate every rationale, one after the other.
 
@@ -350,6 +362,9 @@ def judge_items(
         llm: Function with the signature of ``generate_json``; tests pass a fake.
         on_progress: Called after each rationale with its position, the total and its
             record.
+        call_retries: How often a rationale whose call failed is tried again.
+        retry_wait_s: Pause before each such retry, in seconds.
+        sleep: Function that pauses for a number of seconds; tests pass a fake.
 
     Returns:
         One record per item, in the same order.
@@ -361,18 +376,24 @@ def judge_items(
     for position, item in enumerate(items, start=1):
         if item.id not in posting_texts:
             raise JudgeError(f"Posting '{item.id}' of the run is not in the test set file.")
-        with trace_scope(
-            cv=cv, experiment=JUDGE_EXPERIMENT, version=JUDGE_EXPERIMENT, posting_id=item.id
-        ):
-            record = judge_rationale(
-                posting_texts[item.id],
-                cv,
-                item,
-                model=model,
-                provider=provider,
-                timeout_s=timeout_s,
-                llm=llm,
-            )
+        for attempt in range(call_retries + 1):
+            if attempt:
+                sleep(retry_wait_s)
+            with trace_scope(
+                cv=cv, experiment=JUDGE_EXPERIMENT, version=JUDGE_EXPERIMENT, posting_id=item.id
+            ):
+                record = judge_rationale(
+                    posting_texts[item.id],
+                    cv,
+                    item,
+                    model=model,
+                    provider=provider,
+                    timeout_s=timeout_s,
+                    llm=llm,
+                )
+            # Only a failed call is worth repeating; an invalid answer was already retried.
+            if not record.error.startswith(LLM_ERROR_PREFIX):
+                break
         records.append(record)
         if on_progress:
             on_progress(position, len(items), record)
@@ -675,6 +696,7 @@ def judge_run_file(
     timeout_s: float = JUDGE_TIMEOUT_S,
     limit: int | None = None,
     llm: LLMCall | None = None,
+    sleep: SleepFn = time.sleep,
 ) -> JudgeReport:
     """Judge the rationales of one saved run and save the report next to it.
 
@@ -687,6 +709,7 @@ def judge_run_file(
         timeout_s: Timeout for one HTTP request, in seconds.
         limit: Judge only the first N rationales; None judges all.
         llm: Function with the signature of ``generate_json``; tests pass a fake.
+        sleep: Function that pauses before a failed call is retried; tests pass a fake.
 
     Returns:
         The saved report.
@@ -710,6 +733,7 @@ def judge_run_file(
         timeout_s=timeout_s,
         llm=llm,
         on_progress=_print_progress,
+        sleep=sleep,
     )
     report = build_judge_report(
         records,

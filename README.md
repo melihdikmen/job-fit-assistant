@@ -78,29 +78,54 @@ The page listens on this machine only and has no share-link option, because ever
 request sends the CV in `data/cv.md` to the chosen model. It has one button, "Decide",
 and stores nothing. Gradio's usage analytics are switched off.
 
-Evaluate a model on the labeled set (`data/postings.jsonl`); this prints accuracy, the
-confusion matrix, the weighted error, the baselines, tokens, cost and latency, lists
-every wrong decision with its rationale, and saves the run to `data/results/`:
+Evaluate a configuration on the dev set (`data/postings_dev.jsonl`). One command prints
+accuracy, the confusion matrix, precision and recall per class, Cohen's kappa, the
+weighted error under three cost matrices, the baselines, tokens, cost and latency,
+lists every wrong decision with its rationale, and saves each run to `data/results/`.
+`--runs 3` repeats the configuration and reports mean and spread; `--judge` lets a
+second model rate the rationales:
 
 ```
-uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --allow-incomplete
-uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --version agent --allow-incomplete
+uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --runs 3 --judge
+uv run python -m job_fit.eval --model gemini-2.5-flash --reasoning on --version agent --runs 3
 ```
 
 Build the comparison tables from saved runs:
 
 ```
-uv run python -m job_fit.compare data/results/<run>.json ...
-uv run python -m job_fit.compare --table versions data/results/<run>.json ...
+uv run python -m job_fit.compare --table reference data/results/<run>.json ...
+uv run python -m job_fit.compare --table costs data/results/<run>.json ...
 ```
+
+Maintain the labeled set and check the judge against your own scores:
+
+```
+uv run python -m job_fit.dataset label --source <rows.jsonl>   # label postings yourself
+uv run python -m job_fit.dataset split                         # dev and held-out files
+uv run python -m job_fit.judge sample --run data/results/<run>.json
+uv run python -m job_fit.judge score
+uv run python -m job_fit.judge agreement
+```
+
+The held-out set (`data/postings_heldout.jsonl`) is refused by `eval` unless
+`--final-heldout` is given. It is looked at once, at the very end.
 
 Live calls cost money (list prices are in the tables below). The tests make no network
 calls: every LLM call is mocked, and a fixture refuses any socket connection.
 
+### What leaves the machine
+
+- The posting and the CV go to the model provider (Vertex AI) with every decision.
+- If `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set in `.env`, every model call
+  is also traced to Langfuse: prompt, output, tokens, latency, cost, model. The CV text
+  is replaced by a hash marker in every trace; posting texts and the model's rationale
+  are traced as they are. Without the keys nothing is traced.
+
 ## How decisions are scored
 
-The test set has 21 real postings labeled by the candidate (APPLY 6, PREPARE 3,
-SKIP 12). Mistakes are not equally expensive, so besides accuracy each run gets a
+The labeled set has 40 real postings (APPLY 9, PREPARE 6, SKIP 25), split by a seeded
+shuffle into a dev set of 27 and a held-out set of 13. Every label was suggested by
+Claude and then confirmed or changed by the candidate. Mistakes are not equally expensive, so besides accuracy each run gets a
 **weighted error** (lower is better):
 
 | Actual \ Predicted | APPLY | PREPARE | SKIP |
@@ -109,13 +134,46 @@ SKIP 12). Mistakes are not equally expensive, so besides accuracy each run gets 
 | **PREPARE** | 1 | 0 | 2 |
 | **SKIP** | 1 (wasted application) | 1 | 0 |
 
-The baseline is a "model" that always answers `SKIP`, the most common label.
+The baseline is a "model" that always answers `SKIP`, the most common label. Because
+that baseline is right on most postings, accuracy flatters it; **Cohen's kappa**
+measures agreement beyond what the label mix gives for free, and the baseline's kappa
+is exactly 0.
 
 ## Results
 
 Full tables, caveats and reasoning: [docs/results.md](docs/results.md).
 
-### Model comparison
+### Week 2 reference (current)
+
+Dev set, 27 postings, three runs per configuration, mean ± standard deviation.
+
+| Configuration | Accuracy | Weighted error (mean) | APPLY recall | Kappa | Cost per 100 postings | Avg. latency |
+|---|---|---|---|---|---|---|
+| Baseline (always SKIP) | 63.0% | 0.96 | 0.0% | 0.00 | $0.00 | 0.0 s |
+| Workflow, gemini-2.5-flash, reasoning on | 65.4% ± 2.1% | 0.51 ± 0.06 | 44.4% ± 9.6% | 0.37 ± 0.04 | $0.62 | 11.4 s |
+| Workflow, gemini-2.5-flash, reasoning off | 60.5% ± 2.1% | 0.40 ± 0.02 | 44.4% ± 9.6% | 0.38 ± 0.02 | $0.16 | 2.7 s |
+| Workflow, gemini-3.1-flash-lite | 55.6% ± 0.0% | 0.44 ± 0.00 | 50.0% ± 0.0% | 0.32 ± 0.00 | $0.10 | 1.9 s |
+| Agent, gemini-2.5-flash, reasoning on | 67.9% ± 5.7% | 0.35 ± 0.08 | 72.2% ± 9.6% | 0.48 ± 0.09 | $0.74 | 14.3 s |
+
+- **Noise figure: 0.077** of mean weighted error between runs of one configuration. A
+  smaller difference between two configurations is not an improvement.
+- Accuracy barely beats the baseline; kappa shows that every configuration does real
+  work (0.32 to 0.48 against 0).
+- The Week 1 choice (workflow, reasoning on) has the worst weighted error here: it is
+  the only configuration that rates good jobs as `SKIP` (5 times in three runs). The
+  agent has the best, by twice the noise figure against that workflow, and is still
+  the least stable (8 of 27 predictions changed between its runs).
+- The ranking is the same whether a missed good job costs 2, 3 or 5.
+- A judge model rated the rationales 4.1 to 4.6 out of 5, but it agreed with the
+  candidate's own scores on only 4 of 10 rationales, so that score is reported and not
+  relied on.
+- The held-out set has not been run. Whether to change the Week 1 choice is still
+  open; see the end of [docs/results.md](docs/results.md).
+
+The two sections below are the Week 1 results, on the earlier set of 21 postings. They
+are not comparable with the table above.
+
+### Model comparison (Week 1)
 
 | Model | Accuracy | Weighted error (mean) | Cost per 100 postings | Avg. latency | Notes |
 |---|---|---|---|---|---|
@@ -134,7 +192,7 @@ most expensive model was not the best; it was too strict and rated good jobs as 
 For a handful of postings a day, $0.0064 and 12 seconds per posting are irrelevant; for
 thousands of postings, Flash-Lite would be the better choice.
 
-### Workflow vs. agent
+### Workflow vs. agent (Week 1)
 
 Same model and settings. The agent (LangChain `create_agent`, three tools, at most six
 model calls) sees the posting and reads the CV through a tool.
@@ -153,10 +211,11 @@ a question when a posting is unclear.
 
 ### Limits
 
-- 21 postings: one posting is about 5 points of accuracy, and repeating a run changes
-  one posting or more. Differences of that size are noise.
-- Only 3 `PREPARE` examples; nothing can be said about that class.
-- The labels are one person's judgment.
+- Week 1: 21 postings, so one posting is about 5 points of accuracy. Week 2: 27 dev
+  postings and three runs; the standard deviations come from three values each.
+- `PREPARE` has 4 dev postings (3 in Week 1); nothing can be said about that class.
+- The labels are one person's judgment, and in Week 2 they were confirmed with a
+  suggested label on screen, not given independently.
 - No local and no open-weight model was measured.
 
 ## Project layout
@@ -169,13 +228,16 @@ src/job_fit/
   workflow.py   fixed workflow: one call, validate, retry once, apply rules
   agent.py      agent version (comparison only)
   tools.py      the agent's three read-only tools
-  dataset.py    load and validate the labeled set
-  metrics.py    accuracy, confusion matrix, weighted error, baselines
+  dataset.py    load, validate, label and split the labeled set
+  metrics.py    accuracy, confusion matrix, precision/recall, kappa, weighted error, baselines
   pricing.py    dated list prices
-  eval.py       run a model over the set, report, save
-  compare.py    tables and Pareto front from saved runs
+  eval.py       run a configuration over the dev set (once or repeatedly), report, save
+  judge.py      a second model rates the rationales; checked against the candidate
+  tracing.py    optional Langfuse tracing with the CV masked
+  compare.py    tables from saved runs: Pareto front, spread over runs, cost matrices
   ui.py         local Gradio page around the workflow and the agent
-data/           postings.jsonl (labeled set), postings/, samples/, cv.example.md
+data/           postings.jsonl (labeled set), postings_dev.jsonl, postings_heldout.jsonl,
+                label_log.jsonl, judge_calibration.jsonl, postings/, samples/, cv.example.md
 tests/          pytest suite, no network
 docs/results.md full results
 ```
