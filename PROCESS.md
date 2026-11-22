@@ -252,7 +252,100 @@ When the project is done, these questions should be answerable with numbers:
 
 ---
 
-## 7. Status tracking
+## 7. Week 2 – Become an AI Architect
+
+Phases 0–6 are done. Week 2 extends the same project; it does not start a new one. The repo stays the memory: same `AGENTS.md`, same `PLAN.md`, same working rules (Section 4).
+
+**Goal of Week 2:** turn Job Fit from "one decision per posting" into a small, reliable system that processes a batch of postings, asks the human at the right moment, measures itself properly, and can suggest its own improvements without being trusted blindly.
+
+**Still true:** the tool only recommends. It never applies, sends messages or fills in forms.
+
+### Phase 7 – Better evals and observability
+**Topics:** three kinds of evals, confusion matrix, precision/recall, cost of mistakes, Cohen's kappa, noise, LLM as a judge, traces.
+
+**Tasks**
+- **Re-label the test set yourself.** The current labels started from Claude's suggestions. Go through all postings and fix them (Miny, a1mobile, Rubikpara are known doubtful ones). Grow the set to at least 40 postings, still at least 5 per class.
+- **Split the data:** `data/postings_dev.jsonl` (used while improving prompts) and `data/postings_heldout.jsonl` (about 30%, never looked at while tuning).
+- `eval.py` additions:
+  - Precision and recall per class (especially APPLY recall: missed good jobs).
+  - **Cohen's kappa** against the labels. Show that the "always most common label" baseline scores 0.
+  - **Noise:** run each configuration 3 times and report mean ± spread. A difference smaller than the spread is not a real improvement.
+  - **Sensitivity check on the cost matrix:** rerun the weighted error with 2 alternative weightings (e.g. missed APPLY = 2 and = 5). Does the best model change?
+- **LLM as a judge** for the `rationale` field: a second, different model scores each rationale 1–5 against a written rubric (mentions location rule, language risk, matching and missing skills, consistent with the decision). Check the judge on 10 rationales you scored yourself; report agreement.
+- **Observability:** send every call to Langfuse (free tier or self-hosted): prompt, output, tokens, latency, cost, model. Tag runs by experiment name.
+
+**Done when:** one command prints per-class precision/recall, kappa, mean ± spread over 3 runs, judge score, and the results table in `docs/results.md` is updated with these columns.
+
+---
+
+### Phase 8 – Agent architecture: logic in code, sub-agents
+**Topics:** the three traps, start with a business problem and a baseline, start with one agent, sub-agents, business logic in code.
+
+**Tasks**
+- Write in `docs/architecture.md` (max 1 page): the business problem, the baseline, and why each LLM call exists. Name which of the three traps ("the agent for X", human-like agents, plausible-looking output) the old agent version fell into, if any.
+- Move any remaining business logic out of prompts into `rules.py` and expose it as tools (location, language, seniority, salary conversion).
+- Try **one** sub-agent only if it has a clear reason: e.g. a cheaper model that extracts structured facts from the posting (location, work mode, language, stack) before the main decision. Measure: does it improve accuracy or cost on the dev set? Keep it only if yes.
+
+**Done when:** architecture doc exists, and the sub-agent experiment has a keep/drop decision backed by numbers.
+
+---
+
+### Phase 9 – Agentic RAG, MCP and memory
+**Topics:** RAG, agentic RAG, retrieval evals, MCP (stdio vs HTTP), short- and long-term memory.
+
+**Tasks**
+- **RAG over your own material:** chunk and embed `cv.md`, project READMEs (Vouch, AcenteDefteri, StreetShelf, Job Fit) and short notes about past jobs. Store in a local vector store (Chroma or pgvector).
+- **Agentic RAG:** the decision step may call `search_experience(query)` itself, as many times as it decides (cap at 3). The output adds an `evidence` list with the chunks used.
+- **Retrieval eval:** for 15 postings, write by hand which chunks should be found. Report recall@3 and MRR. Did the facts get found?
+- **MCP server (stdio):** expose `decide_posting(text)` and `search_experience(query)` as an MCP server so Claude Code / Claude Desktop can call it. Keep it local; no secrets in tool descriptions.
+- **Long-term memory (one kind only):** a `preferences.md` file the tool reads at start (e.g. "no on-site outside Ankara/İstanbul", "salary floor 150k TL net"). When you override a decision, the tool may propose a new preference line; you approve it before it is written.
+
+**Done when:** retrieval recall@3 and MRR are reported, the MCP server works from Claude Code, and at least one preference was learned through an approved override.
+
+---
+
+### Phase 10 – Durable state, human in the loop, batch
+**Topics:** durable execution, LangGraph state/nodes/edges, checkpoints, `interrupt()`, dispatcher, retries, max concurrency.
+
+**Tasks**
+- Rebuild the pipeline as a **LangGraph** graph: `load_posting → extract → decide → (human review) → record`.
+- **Checkpoints** in SQLite, one thread per posting. Kill the process in the middle of a batch and restart: it must continue where it stopped, without deciding a posting twice (use the posting id as an idempotency key).
+- **Human in the loop with `interrupt()`:** pause for your approval when the decision is APPLY, when confidence is low, or when the rule layer overrode the LLM. Record what you saw, what you chose and how long it took. Watch for decision fatigue: if you approve 20 in a row without changes, note it.
+- **Dispatcher:** process a batch of 30 postings with `max_concurrency` set (e.g. 4) and a `RetryPolicy` for 429/timeout errors.
+- Keep side effects (writing to `decisions.jsonl`) in their own node, so a resumed run does not write twice.
+
+**Done when:** a 30-posting batch survives a forced crash, human approvals are recorded, and no posting appears twice in the output.
+
+---
+
+### Phase 11 – Self-improvement (guarded)
+**Topics:** the improver, keep or roll back, limits, held-out data, recursion.
+
+**Tasks**
+- An **improver** script reads the latest eval results and the wrong decisions, and proposes **one** change: a prompt edit, a model swap or a reasoning-effort change. It writes the proposal to `proposals/NNN.md`.
+- **You approve** before it runs. Then evals run on the dev set.
+- **Keep or roll back rule:** keep the change only if weighted error improves by more than the noise measured in Phase 7, and no other key metric (APPLY recall, kappa, cost per 100 postings) gets much worse.
+- **Limits:** floors on APPLY recall, a cost budget per run, an allowed-models list, and human approval for every change.
+- Final check on the **held-out set** only at the end, once. If held-out results are much worse than dev, you overfit; write that down.
+- (Optional) Let the improver also suggest one change to its own instructions. Same rules apply.
+
+**Done when:** at least 3 improver cycles are logged with keep/roll-back decisions, and the held-out result is reported.
+
+---
+
+### Week 2 interview story
+Add these to Section 6:
+9. How did you know an improvement was real and not noise?
+10. What did Cohen's kappa tell you that accuracy did not?
+11. When did you choose a sub-agent, and when did you drop it?
+12. How did retrieval quality affect the final decision quality?
+13. Where does the human step in, and how did you avoid decision fatigue?
+14. What happens if the process crashes in the middle of a batch?
+15. How did you stop the self-improver from overfitting or breaking things?
+
+---
+
+## 8. Status tracking
 
 At the end of each phase, Claude Code updates this table at the top of `PLAN.md`:
 
@@ -265,3 +358,8 @@ At the end of each phase, Claude Code updates this table at the top of `PLAN.md`
 | 4 – Agent | ⬜ | | |
 | 5 – Harden | ⬜ | | |
 | 6 – UI (optional) | ⬜ | | |
+| 7 – Evals & observability | ⬜ | | |
+| 8 – Agent architecture | ⬜ | | |
+| 9 – RAG, MCP, memory | ⬜ | | |
+| 10 – Durable state & HITL | ⬜ | | |
+| 11 – Self-improvement | ⬜ | | |

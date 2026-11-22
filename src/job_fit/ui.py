@@ -24,6 +24,7 @@ import gradio as gr
 from job_fit.agent import decide_with_agent
 from job_fit.llm import LLMError
 from job_fit.pricing import call_cost_usd
+from job_fit.tracing import trace_scope
 from job_fit.workflow import (
     DEFAULT_CV_PATH,
     DecideFn,
@@ -43,6 +44,8 @@ DEFAULT_PORT = 7860
 ANALYTICS_VARIABLE = "GRADIO_ANALYTICS_ENABLED"
 
 APP_TITLE = "Job Fit Assistant"
+# Trace tag for a decision made from the page, outside any eval.
+UI_EXPERIMENT = "ui"
 PRICE_UNKNOWN = "price unknown"
 NONE_TEXT = "none"
 POSTING_LINES = 16
@@ -283,13 +286,15 @@ def run_decision(
         choice = find_model_choice(choice_label)
         if version not in decide_fns:
             raise ValueError(f"Unknown version: '{version}'.")
-        result = decide_fns[version](
-            posting_text,
-            load_cv(),
-            model=choice.model,
-            provider=choice.provider,
-            reasoning=choice.reasoning,
-        )
+        cv = load_cv()
+        with trace_scope(cv=cv, experiment=UI_EXPERIMENT, version=version):
+            result = decide_fns[version](
+                posting_text,
+                cv,
+                model=choice.model,
+                provider=choice.provider,
+                reasoning=choice.reasoning,
+            )
     except (OSError, ValueError, LLMError, DecisionError) as err:
         return DecisionView(decision="", message=f"No decision: {err}")
     return DecisionView(

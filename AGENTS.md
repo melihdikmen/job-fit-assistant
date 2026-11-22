@@ -7,22 +7,22 @@ in code and override the LLM. It measures accuracy, cost and latency on a labele
 
 ## Commands
 - Install: `uv sync` · Test: `uv run pytest` · Lint: `uv run ruff check .` · Format: `uv run ruff format .`
-- Eval: `uv run python -m job_fit.eval --model <model> [--version agent] --allow-incomplete` · Page: `uv run python -m job_fit.ui`
+- Eval (dev set): `uv run python -m job_fit.eval --model <model> [--version agent] [--runs 3] [--judge]` · Page: `uv run python -m job_fit.ui`
 - Hook: `.claude/settings.json` runs ruff and pytest after every edit of a `.py` file or `pyproject.toml`.
 
 ## Folders
-- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools, ui)
-- `data/cv.md` – candidate CV (git-ignored); `data/postings.jsonl` – labeled test set; `data/results/` – run outputs (git-ignored)
+- `src/job_fit/` – package (schema, rules, llm, workflow, dataset, metrics, pricing, eval, compare, agent, tools, ui, judge, tracing)
+- `data/cv.md` – candidate CV (git-ignored); `data/postings.jsonl` – labeled set, split into `postings_dev.jsonl` and `postings_heldout.jsonl`; `data/results/` – run outputs (git-ignored)
 - `tests/` – pytest suite; `docs/results.md` – result tables; `.claude/hooks/` – post-edit check
 
 ## Rules
-- Plan first: write the phase plan to `PLAN.md`, wait for approval, then code.
-- One phase at a time; commit at the end as `phase-N: <short description>`.
+- Plan first: write the phase plan to `PLAN.md`, wait for approval, then code. One phase at a time; commit at the end as `phase-N: <short description>`.
+- The held-out set is run once, at the end of Phase 11 (`--final-heldout`). Until then never evaluate it, read model output on it, or tune against it.
 - Show ruff and pytest output as evidence before saying "done"; run `ruff format` before a commit.
 - No Turkish anywhere in code: identifiers, comments, docstrings, strings, file names.
 - Every function, including tests and private helpers, has a Google-style docstring (ruff `D`).
 - API keys only from `.env`; never commit `.env` or service-account JSON keys.
-- Do not log personal data beyond `data/cv.md` and posting texts.
+- Do not log personal data beyond `data/cv.md` and posting texts; traces mask the CV. Labels come from the candidate, never from a model.
 - LLM calls are mocked in tests. The tool only recommends; it never applies or sends.
 - When in doubt, ask.
 

@@ -9,6 +9,7 @@ dependencies = [
     "gradio>=6.31.0",
     "langchain>=1.4.10",
     "langchain-google-genai>=4.4.3",
+    "langfuse>=5.2.0",
     "openai>=3.49.0",
     "pydantic>=2.14.3",
     "python-dotenv>=1.2.4",

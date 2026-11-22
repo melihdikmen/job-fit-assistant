@@ -11,6 +11,11 @@
 | 4 – Agent | ✅ | see `git log --grep phase-4` | no agent needed (D27): workflow 69.0% / mean w.err 0.45 / $0.64 / 12.0 s vs. agent 73.8% / 0.26 / $0.75 / 14.9 s (means of 2 runs; agent runs differ by 5 postings, same tool calls every time); 265 tests |
 | 5 – Harden | ✅ | see `git log --grep phase-5` | 322 tests; post-edit hook shown working; code review by a separate agent, 4 findings fixed (D33) and 8 reported; README; public repo https://github.com/melihdikmen/job-fit-assistant |
 | 6 – UI (optional) | ✅ | see `git log --grep phase-6` | local Gradio page (`uv run python -m job_fit.ui`): posting, 3 measured model choices, workflow or agent, decision and cost; localhost only, analytics off; 350 tests; page checked in the browser by the candidate; pushed to GitHub |
+| 7 – Evals & observability | 🟡 | | steps 1–8 done 2026-11-22 (code and 473 tests, no eval run yet); waiting for the candidate: labels (`dataset label`), rubric approval, Langfuse keys |
+| 8 – Agent architecture | ⬜ | | roadmap only |
+| 9 – RAG, MCP, memory | ⬜ | | roadmap only |
+| 10 – Durable state & HITL | ⬜ | | roadmap only |
+| 11 – Self-improvement | ⬜ | | roadmap only |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done
 
@@ -138,6 +143,27 @@ and approved before any code is written ([PROCESS.md §4](PROCESS.md#4-working-r
   candidate's go-ahead.
 - The candidate answered D34-D37 as proposed on 2026-11-11 without objecting to the
   Phase 6 plan; Claude took that as approval of the plan.
+
+- D38 (2026-11-22): `data/postings.jsonl` stays the single source of truth;
+  `dataset split` derives `postings_dev.jsonl` and `postings_heldout.jsonl` from it
+  (stratified per label, about 30% held out, fixed seed). All three are committed.
+- D39 (2026-11-22): the set needs at least 40 postings and at least **8** per class
+  (PROCESS.md asks for 5).
+- D40 (2026-11-22): four configurations get the 3-run reference on the dev set: the
+  workflow on `gemini-2.5-flash` with reasoning on, with reasoning off, on
+  `gemini-3.1-flash-lite`, and the agent on `gemini-2.5-flash` with reasoning on.
+  `gemini-4-carbon` is dropped as a decider.
+- D41 (2026-11-22): the judge is `gemini-4-carbon`, on one run of each configuration,
+  after timing and pricing it on the 10 calibration rationales; above $3 or an hour it
+  falls back to `gemini-3.1-flash-lite`, stated in the results.
+- D42 (2026-11-22): Langfuse Cloud, EU region, free tier. The CV block of a traced
+  prompt is replaced by its hash; posting, output and numbers are traced.
+- D43 (2026-11-22): the held-out set is not run before the end of Phase 11, not even
+  for a baseline. `eval` refuses the file without `--final-heldout`.
+- D44 (2026-11-22): review finding R5 is fixed in Phase 7: the prompt hash also covers
+  the schema field descriptions and the retry note; the CV gets its own hash.
+- The candidate accepted D38-D44 as proposed on 2026-11-22 and told Claude to go on;
+  Claude took that as approval of the Phase 7 plan.
 
 ## What the candidate does (Claude cannot)
 
@@ -1288,3 +1314,323 @@ editing, history of past decisions, login, deployment or a public link, streamin
 - Spend: two or three live decisions, about 2 cents at list price.
 - Running the agent with a model other than the default is unmeasured (D35); the page
   says so next to the choice.
+
+---
+
+## Week 2 – overview (Phases 7–11)
+
+Source: [PROCESS.md §7](PROCESS.md#7-week-2--become-an-ai-architect). Written 2026-11-22.
+Phase 7 has a detailed plan below; Phases 8–11 have a roadmap and are expanded and
+approved one at a time, as in Week 1.
+
+How the phases depend on each other:
+
+| Phase | Needs from earlier phases | Leaves for later phases |
+|---|---|---|
+| 7 – Evals and observability | the Week 1 workflow, agent and eval | own labels, dev / held-out split, the noise figure, kappa, judge, traces |
+| 8 – Agent architecture | dev set and noise figure (7) | `docs/architecture.md`, keep/drop of the extraction sub-agent |
+| 9 – RAG, MCP, memory | dev set (7); the decision step as left by 8 | `search_experience`, `evidence`, MCP server, `preferences.md` |
+| 10 – Durable state, HITL, batch | the decision step as left by 8–9 | LangGraph pipeline, `decisions.jsonl`, approval log |
+| 11 – Self-improvement | noise figure and held-out set (7), batch eval | improver cycles, the one held-out result |
+
+Rules that hold for all of Week 2:
+- **The held-out set is run once, at the end of Phase 11.** Until then no eval, no
+  prompt work and no reading of model output on it, by the candidate or by Claude.
+- **Every Week 1 number becomes history.** Relabeling and growing the set changes the
+  dataset hash, so the tables of Phases 3–4 stay in `docs/results.md` as "old set, old
+  labels" and are not compared with new runs.
+- **A change to a prompt, the schema or a tool description needs a new 3-run
+  reference** for every row it is compared with (lesson from Week 1; about $0.50 per
+  configuration at list price).
+- **Still true:** the tool only recommends. New parts (MCP server, batch, improver)
+  get the same guard: no tool or node that applies, sends or fills in anything.
+
+---
+
+## Phase 7 – Better evals and observability (in progress)
+
+Source: [PROCESS.md §7 Phase 7](PROCESS.md#phase-7--better-evals-and-observability)
+
+State at the start (checked 2026-11-22): working tree clean except the candidate's edit
+of `PROCESS.md`; 350 tests; `data/postings.jsonl` has 21 postings (APPLY 6, PREPARE 3,
+SKIP 12) with labels accepted from a suggested list; `metrics.py` has accuracy, the
+confusion matrix, weighted error with one fixed cost matrix and the constant baselines,
+but no precision, recall or kappa; `eval.py` runs one configuration once; `langfuse` is
+not a dependency; Docker is installed (29.9.2) on a machine with 7.8 GB RAM;
+`gemini-4-carbon`'s promotional price ends on 2026-11-30.
+
+### Before the live runs (candidate)
+
+These are the parts only the candidate can do. Steps 1–8 need none of them.
+
+- [x] Answer D38–D44 (all decided as proposed, see Decided) and approve this plan.
+- [ ] **Relabel all 21 postings yourself**, with `dataset relabel` (step 3): it shows
+      the posting text only, not the old label and not any model output. Claude does
+      not suggest labels this time; that is the point of the task.
+- [ ] **Collect at least 19 new postings** (40 or more in total) and label each one
+      before any model sees it. Include more PREPARE cases (D39) and hard cases: a good
+      stack in a blocked city, a junior role with a matching stack, no location given.
+- [ ] Edit or approve the judge rubric that Claude drafts (step 5), then **score 10
+      rationales yourself**, 1–5, before seeing the judge's scores.
+- [ ] Create a Langfuse project and put its keys into `.env` (D42).
+- [ ] Budget alert in the Google Cloud console, still open from Phase 3.
+
+### Design
+
+| Question | Answer | Why |
+|---|---|---|
+| Where do the new numbers live? | `metrics.py`, as pure functions: `precision_recall`, `cohen_kappa`, and `weighted_error` with the cost matrix as a parameter. | Testable with hand-made inputs; eval and compare only call them. |
+| What is a failed posting for precision, recall and kappa? | Its own outcome, "failed": it lowers recall of its true class and counts as a disagreement in kappa. It is never dropped. | Same principle as D5: a failure must not make a model look better. |
+| How is the split made? | By code: `dataset split`, stratified per label, about 30% held out, fixed seed, postings ordered by id. | Nobody hand-picks which postings are "easy enough" for dev. The same input always gives the same split. |
+| How is the held-out set protected? | `eval` refuses `postings_heldout.jsonl` unless `--final-heldout` is given, and `AGENTS.md` gets a rule. | A guard in code is stronger than a promise in a document. |
+| What is "spread"? | Over the 3 runs of one configuration: the mean, the sample standard deviation and min–max. The **noise figure** is the largest standard deviation of mean weighted error among the configurations. | Three runs give a rough spread only; showing min–max next to it keeps that visible. Phase 11 uses the noise figure as its keep/roll-back threshold. |
+| How is the cost-matrix check done? | Recomputed from the saved run files with two other matrices (missed APPLY = 2 and = 5); no new model calls. | The predictions do not change with the weights, only their price. |
+| What does the judge see? | The posting, the CV, the final rationale, the extracted fields, the decision and the rules that fired. **Not the label.** It returns a structured `RationaleScore`: one yes/no per rubric line, then a score 1–5. | The judge rates the explanation, not whether the decision was right; showing it the label would turn it into a second classifier. |
+| How is the judge checked? | 10 rationales, drawn by a seeded sample spread over the three decisions, scored by the candidate first. Reported: exact agreement, agreement within one point, mean absolute difference. | Ten items cannot support a kappa; three plain figures are honest about that. |
+| Where is tracing hooked in? | In `llm.py`, the only module that talks to a provider: around `generate_json`, and as a callback on the agent's chat model. Off unless the Langfuse keys are set; tests never trace. | One place, so no call can be forgotten, and the page (`ui.py`) is covered without touching it. |
+| What goes into a trace? | Prompt, output, tokens, latency, cost, model, and tags: experiment name, version, run number. Whether the CV text is included is D42. | PROCESS.md lists exactly these; the CV is the one piece of personal data in the prompt. |
+
+### Steps
+1. [x] Look up, do not recall: the current Langfuse Python SDK (version, how a
+       generation is recorded, the LangChain callback, how tracing is disabled), the
+       limits of its free tier, and what self-hosting needs. Probe `gemini-2.5-flash`,
+       `gemini-3.1-flash-lite` and the judge model with one call each and read their
+       prices from the pricing page (`gemini-4-carbon` changes price on 2026-12-01).
+       Findings are written here.
+2. [x] `metrics.py`: `precision_recall(actual, predicted) -> dict[label, ClassScores]`
+       (a class that was never predicted has no precision: shown as "n/a", not 0);
+       `cohen_kappa(actual, predicted)`; `weighted_error(..., costs=ERROR_COSTS)`;
+       `ALTERNATIVE_COSTS` with the two other matrices. Tests derive expected values
+       from small hand-made tables, and one test shows that a constant predictor has
+       kappa 0 for any label mix.
+3. [x] `dataset.py`
+       - `relabel`: interactive, one posting at a time, text only; writes the new label
+         and note; resumable. Afterwards it prints how many labels changed and the
+         kappa between the old suggested labels and the candidate's own.
+       - `split`: writes `data/postings_dev.jsonl` and `data/postings_heldout.jsonl`
+         (D38) and prints the label counts of both.
+       - Coverage: 40 postings and the per-class minimum of D39; `--allow-incomplete`
+         is no longer needed once the set is complete.
+4. [x] `eval.py`
+       - Report gains precision and recall per class, kappa (model and baselines) and
+         the weighted error under the two alternative matrices.
+       - `--runs N` (default 1): N sequential runs of one configuration, one run file
+         each, then a summary with mean, standard deviation and min–max of every
+         headline number, saved as a group file.
+       - `--experiment <name>`: stored in the run file and used as the trace tag.
+       - Default data file becomes the dev set; the held-out guard.
+       - Prompt hash (review finding R5, if D44 is accepted): also covers the schema
+         field descriptions and the retry note; the CV gets its own hash in the run
+         file.
+5. [x] `judge.py` (new)
+       - `RUBRIC` as one constant and `RationaleScore` in `schema.py`.
+       - `judge_run(run_file, postings, cv, *, model) -> JudgeReport`; results saved
+         next to the run file; mean score and per-criterion pass rates in the report.
+       - `judge sample` writes the 10 calibration items without scores;
+         `judge agreement` compares the candidate's scores with the judge's.
+       - `eval --judge` runs it after the last run, so one command prints everything
+         the done criterion asks for.
+6. [x] Tracing in `llm.py`: optional Langfuse client created only when the keys are in
+       `.env`; a failure to send a trace is logged and never fails the decision.
+       `langfuse` goes into `pyproject.toml` and the dependency allow-list in the same
+       change. `.env.example` gets the new variable names.
+7. [x] `compare.py`: rows are groups of repeated runs; the table gains APPLY recall,
+       kappa, "± spread" and judge score; a second small table shows the ranking under
+       the three cost matrices.
+8. [x] Tests for all of the above (no network, no real LLM, fake judge, fake tracer),
+       then `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`.
+9. [ ] Dataset in place: the candidate's relabeling and new postings; `dataset check`;
+       `dataset split`; commit the three data files.
+10. [ ] Live runs on the dev set, sequential: a `--limit 2` smoke run with tracing on,
+        then 3 runs of each configuration of D40, then the judge (D41), then the
+        calibration comparison.
+11. [ ] `docs/results.md`: a new "Week 2 reference" section with the new columns, the
+        noise figure, the cost-matrix check, the label-agreement figure from the
+        relabeling, the judge check, and what kappa shows that accuracy did not. The
+        Week 1 tables stay, marked as the old set. The candidate edits or approves the
+        conclusions.
+12. [ ] `README.md` (what now leaves the machine: traces), `AGENTS.md` (held-out rule,
+        new commands, lessons), record results here, commit
+        `phase-7: evals and observability`; push after the pre-push check and the
+        candidate's go-ahead.
+
+### Results of steps 1–8 (2026-11-22)
+
+`ruff check` and `ruff format --check` clean; 473 tests pass (350 at the start). No
+eval run has been made yet: the live steps wait for the candidate's labels.
+
+**Lookups (step 1).**
+- All three models answer in `global`: `gemini-2.5-flash`, `gemini-3.1-flash-lite`,
+  `gemini-4-carbon` (one-word probe each).
+- Prices read from the raw HTML of the Vertex AI pricing page on 2026-11-22, unchanged:
+  `gemini-2.5-flash` 0.30 / 2.50, `gemini-3.1-flash-lite` 0.25 / 1.50, `gemini-4-carbon`
+  2.00 / 10.00 through 2026-11-30 and 4.00 / 20.00 from 2026-12-01. `pricing.py` holds
+  the promotional price: **if the judge runs on or after 2026-12-01, the table must be
+  updated first.**
+- Langfuse SDK 5.2.0 (OpenTelemetry based). Cloud free tier ("Hobby"): 50k units a
+  month, 30 days of data access, 2 users, no credit card; a unit is any trace,
+  observation or score. EU base URL `https://cloud.langfuse.com`. Self-hosting needs
+  Postgres, ClickHouse, Redis and blob storage and recommends 16 GiB of memory, twice
+  what this machine has, so D42 (cloud) stands.
+- The SDK applies its mask function synchronously, in the caller's context, to every
+  input, output and metadata value, for hand-made observations and for the LangChain
+  callback handler alike. A client can export to memory, so the masking is tested
+  end to end without a network.
+
+**What was built**
+
+| Module | New |
+|---|---|
+| `metrics.py` | `precision_recall`, `cohen_kappa`, `weighted_error_total` with a cost-matrix parameter, `ALTERNATIVE_COSTS` (missed APPLY = 2 and = 5), `spread` |
+| `dataset.py` | `label` (blind, resumable, logs suggested vs. own label and prints their kappa), `split` (stratified, seeded, refuses to split twice), thresholds 40 / 8 and the derived dev thresholds 28 / 6 |
+| `eval.py` | precision, recall, kappa and alternative-matrix lines in the report; `--runs`, `--experiment`, `--judge`, `--final-heldout`; held-out guard; run summary with mean, stdev, min, max; prompt hash now covers the schema and the retry note, CV hash stored (R5) |
+| `judge.py` | rubric, `RationaleScore`, `judge run / sample / score / agreement` |
+| `tracing.py` | optional Langfuse tracing with the CV masked; hooked into `llm.generate_json` and the agent's LangChain run |
+| `compare.py` | `--table reference` (one row per configuration, mean ± stdev, APPLY recall, kappa, judge score, noise figure) and `--table costs` (ranking under three matrices) |
+
+**Dataset state.** The candidate supplied 19 new posting texts (`data/postings/*.txt`)
+and `data/postings/postings_week2.jsonl`, rows prepared in another Claude session with
+**suggested** labels (APPLY 3, PREPARE 6, SKIP 10). They were not imported. The
+candidate labels them, and the 21 old postings, with `dataset label`, which hides the
+suggestion; the suggestion is kept only as the other side of the agreement figure.
+Caveat for the results: the candidate had seen the suggested list before labeling, so
+the labels are the candidate's decision but not an independent one. If the suggested
+counts hold, the set has APPLY 9, PREPARE 9, SKIP 22, which meets D39.
+
+**Deviations from the plan above**
+- One command, `dataset label --source <file>`, serves both the relabeling of the old
+  set and the labeling of new rows; the plan named it `relabel`.
+- Tracing lives in its own module, `tracing.py`; `llm.py` and `agent.py` only call it.
+  It reads the `LANGFUSE_*` variables itself, so `llm.py` is no longer the only module
+  that reads `.env` (it is still the only one that reads provider settings).
+- A model call is traced only inside a `trace_scope`, which knows the CV to mask.
+  Eval, the judge, the command lines and the page open one; a call made any other way
+  is not traced rather than traced unmasked.
+- Masking works on the whole CV and on each of its lines of 8 characters or more.
+  Shorter lines (a heading such as `## Skills`) are not masked. What the model writes
+  about the candidate in its own words is not CV text and is traced (plan risk).
+- The judge sees the posting, the CV, both decisions, the fired rules and the
+  rationale, but not the other extracted fields: run files do not store them.
+- The rubric line on hard rules counts the rule note appended by code, as the plan's
+  risk section proposed; the candidate still has to approve the rubric text
+  (`RUBRIC` in `judge.py`).
+- `eval` checks the dev thresholds (28 postings, 6 per class), not the full-set ones;
+  the full set is checked by `dataset check` and `dataset split`.
+- The cost of an agent trace is whatever Langfuse derives from token counts; only
+  workflow and judge generations carry the cost computed from `pricing.py`.
+
+**Commands for the candidate's steps**
+
+```
+uv run python -m job_fit.dataset label --source data/postings/postings_week2.jsonl
+uv run python -m job_fit.dataset label --source data/postings.jsonl
+uv run python -m job_fit.dataset check
+uv run python -m job_fit.dataset split
+```
+
+**Done when:** one command prints per-class precision and recall, kappa, mean ± spread
+over 3 runs and the judge score, and the table in `docs/results.md` has these columns.
+
+**Not in this phase:** any prompt, schema or tool change to improve results (that is
+Phase 11, on the dev set); running the held-out set; new models; the sub-agent, RAG,
+LangGraph; parallel runs.
+
+**Risks**
+- **The data work is the long pole.** Nineteen new postings and forty honest labels are
+  hours of the candidate's time, and nothing after step 8 can start without them.
+- **Small classes stay small.** With 8 PREPARE postings and a 30% split, the held-out
+  set has 2 or 3 of them; per-class recall there moves in steps of a third or a half.
+- **Three runs are a thin estimate of noise.** In Week 1 two agent runs differed by 5
+  of 21 postings. If the spread comes out larger than any difference between
+  configurations, that is the result, and Phase 11 inherits a threshold few changes
+  will pass.
+- **The judge may not agree with the candidate.** Then its score is reported as
+  unvalidated and is not used as a keep/roll-back criterion later.
+- **The rubric line "mentions the location rule" fits the design badly:** the workflow
+  prompt tells the model to leave location to the code, and the rule tag is appended to
+  the rationale by code. The rubric must rate the final rationale as the user sees it,
+  or drop that line; to be settled when the rubric is drafted.
+- **Tracing sends data to a third party** (D42). With the CV masked, the posting text
+  and the model's rationale about the candidate still go there.
+- **Models can disappear.** `gemini-2.5-flash` was flagged in Week 1 as possibly due
+  for retirement; if the probe fails, the reference is measured on its successor and
+  the Week 1 choice is revisited.
+- Spend (list price, rough): 4 configurations × 3 runs × about 28 dev postings is under
+  $1.50; the judge depends on D41 and is measured on 10 rationales before the full
+  pass, with a ceiling of $3.
+
+---
+
+## Phase 8 – Agent architecture (roadmap)
+
+Source: [PROCESS.md §7 Phase 8](PROCESS.md#phase-8--agent-architecture-logic-in-code-sub-agents)
+
+- `docs/architecture.md`, one page: the business problem, the baseline, why each LLM
+  call exists, and which of the three traps the Week 1 agent fell into. Material is
+  already measured: it made the same three tool calls on all 42 decisions, and two of
+  its three tools changed nothing.
+- Audit the prompts for business logic. Known candidates: the APPLY / PREPARE / SKIP
+  definitions in the system prompt, and salary conversion, which has a tool but no
+  field in `JobDecision` to use it.
+- One experiment: a cheap model (`gemini-3.1-flash-lite`) extracts the facts, the main
+  model decides. Compared with the Phase 7 reference on the dev set, 3 runs each;
+  kept only if the gain is larger than the noise figure.
+- To decide at the start: whether the sub-agent replaces the fact fields of
+  `JobDecision` (a schema change, new reference runs) or only feeds them in.
+
+## Phase 9 – Agentic RAG, MCP and memory (roadmap)
+
+Source: [PROCESS.md §7 Phase 9](PROCESS.md#phase-9--agentic-rag-mcp-and-memory)
+
+- Material from the candidate: READMEs of Vouch, AcenteDefteri and StreetShelf, and
+  short notes on past jobs. All of it is personal data and stays git-ignored like the
+  CV.
+- Local vector store (Chroma or pgvector, chosen after a spike) and an embedding
+  model; embeddings are a new kind of call with its own price.
+- `search_experience(query)`, at most 3 calls per decision; `JobDecision` gains
+  `evidence`. That is a schema change, so the reference is run again.
+- Retrieval eval on 15 dev postings: the candidate writes the expected chunks by hand;
+  recall@3 and MRR. The CV is under 800 words and fits in the prompt, so the honest
+  question is whether retrieval adds anything over the full CV; the plan must measure
+  that, not assume it.
+- MCP server over stdio with `decide_posting` and `search_experience`; local only.
+- `preferences.md`: read at start; a new line is proposed after an override and
+  written only after approval. To decide: a preference such as a salary floor needs a
+  fact the schema does not extract today.
+
+## Phase 10 – Durable state, human in the loop, batch (roadmap)
+
+Source: [PROCESS.md §7 Phase 10](PROCESS.md#phase-10--durable-state-human-in-the-loop-batch)
+
+- LangGraph graph `load_posting → extract → decide → (human review) → record`, SQLite
+  checkpoints, one thread per posting, the posting id as idempotency key. `langgraph`
+  is already installed through `langchain`; the SQLite checkpointer is a new package.
+- `interrupt()` on APPLY, on low confidence and on a rule override. **"Low confidence"
+  has no source today:** `JobDecision` has no such field. To decide at the start: a
+  new field (schema change), or a measured signal such as disagreement between runs.
+- Dispatcher with `max_concurrency` and a `RetryPolicy` for 429 and timeouts;
+  `decisions.jsonl` written by its own node.
+- The crash test is part of the done criterion: kill the process mid-batch, restart,
+  show that no posting is decided or written twice.
+- To decide: which 30 postings. New unlabeled ones make the human review real; the dev
+  set would let the candidate's choices be compared with the labels.
+- Approval log: what was shown, what was chosen, how long it took; a note when 20 in a
+  row are approved unchanged.
+
+## Phase 11 – Self-improvement, guarded (roadmap)
+
+Source: [PROCESS.md §7 Phase 11](PROCESS.md#phase-11--self-improvement-guarded)
+
+- Improver script: reads the latest dev eval and its wrong decisions, proposes one
+  change (prompt, model or reasoning) as `proposals/NNN.md`. It proposes; it does not
+  apply.
+- Each cycle: the candidate approves, the dev set is run 3 times, the keep/roll-back
+  rule is applied in code: weighted error better by more than the Phase 7 noise
+  figure, and APPLY recall, kappa and cost per 100 postings not much worse. "Much
+  worse" becomes numbers before the first cycle, not after.
+- Limits in code: a floor on APPLY recall, a cost budget per run, an allowed-models
+  list, approval for every change.
+- At least 3 cycles logged, then the held-out set, once. A large gap between dev and
+  held-out is written down as overfitting.
+- Risk known in advance: each cycle is 3 runs, and the dev set is small; if the noise
+  figure is large, most proposals will be rolled back. That is the guard working.

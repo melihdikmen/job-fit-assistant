@@ -26,6 +26,7 @@ from job_fit.llm import CHAT_MODEL_ERRORS, DEFAULT_TIMEOUT_S, LLMError, chat_mod
 from job_fit.rules import apply_rules
 from job_fit.schema import JobDecision
 from job_fit.tools import build_tools, tool_descriptions
+from job_fit.tracing import langchain_callbacks
 from job_fit.workflow import (
     DEFAULT_PROVIDER,
     DecisionError,
@@ -178,7 +179,11 @@ def _invoke_agent(agent: Any, posting_text: str, model: str, max_steps: int) -> 
     try:
         return agent.invoke(
             {"messages": [HumanMessage(build_agent_prompt(posting_text))]},
-            config={"recursion_limit": GRAPH_RECURSION_LIMIT},
+            config={
+                "recursion_limit": GRAPH_RECURSION_LIMIT,
+                # Empty unless tracing is configured and a trace scope is active.
+                "callbacks": langchain_callbacks(),
+            },
         )
     except (ModelCallLimitExceededError, GraphRecursionError) as err:
         raise DecisionError(f"Agent on '{model}' did not finish within {max_steps} steps.") from err

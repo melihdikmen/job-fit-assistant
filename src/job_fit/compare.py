@@ -7,6 +7,10 @@ Run it with::
 It prints a Markdown table (one row per run, plus the majority baseline) and marks the
 runs on the Pareto front of weighted error, cost and latency. With ``--table versions``
 it prints the workflow-vs-agent table instead.
+
+``--table reference`` groups repeated runs of one configuration into one row with the
+mean and the spread of each number, and adds APPLY recall, kappa and the judge score.
+``--table costs`` shows whether the ranking survives a different cost matrix.
 """
 
 import argparse
@@ -17,8 +21,30 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from job_fit.eval import COST_REPORT_UNIT, DEFAULT_VERSION, EvalReport
+from job_fit.eval import (
+    ACCURACY,
+    COST_PER_100,
+    COST_REPORT_UNIT,
+    DEFAULT_VERSION,
+    KAPPA,
+    LATENCY,
+    WEIGHTED_ERROR,
+    EvalReport,
+    summarize_runs,
+)
+from job_fit.judge import load_judge_report
+from job_fit.metrics import ALTERNATIVE_COSTS, ERROR_COSTS, MISSED_APPLY, Spread
 from job_fit.workflow import DEFAULT_REASONING
+
+APPLY_RECALL = "recall APPLY"
+NOT_JUDGED = "not judged"
+NOT_APPLICABLE = "n/a"
+REFERENCE_TABLE_HEADER = (
+    "| Configuration | Runs | Accuracy | Weighted error (mean) | APPLY recall | Kappa | "
+    f"Cost per {COST_REPORT_UNIT} postings | Avg. latency | Judge score |"
+)
+REFERENCE_TABLE_DIVIDER = "|---|---|---|---|---|---|---|---|---|"
+DEFAULT_COSTS_NAME = f"missed APPLY = {ERROR_COSTS[MISSED_APPLY]} (default)"
 
 VERTEX_PROVIDER = "vertex"
 BASELINE_NAME = "Baseline"
@@ -36,7 +62,9 @@ VERSION_TABLE_HEADER = (
 VERSION_TABLE_DIVIDER = "|---|---|---|---|---|---|---|"
 MODELS_TABLE = "models"
 VERSIONS_TABLE = "versions"
-TABLES = (MODELS_TABLE, VERSIONS_TABLE)
+REFERENCE_TABLE = "reference"
+COSTS_TABLE = "costs"
+TABLES = (MODELS_TABLE, VERSIONS_TABLE, REFERENCE_TABLE, COSTS_TABLE)
 
 
 class CompareError(RuntimeError):
@@ -272,6 +300,173 @@ def format_version_table(reports: Sequence[EvalReport]) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class RunGroup:
+    """Repeated runs of one configuration.
+
+    Attributes:
+        name: Model id with its version and reasoning setting.
+        reports: Reports of the runs, in the order given.
+        run_files: The files the reports were read from, in the same order.
+    """
+
+    name: str
+    reports: tuple[EvalReport, ...]
+    run_files: tuple[Path, ...]
+
+
+def group_runs(paths: Sequence[Path], reports: Sequence[EvalReport]) -> list[RunGroup]:
+    """Put runs of the same configuration together.
+
+    Args:
+        paths: Run files.
+        reports: Their reports, in the same order.
+
+    Returns:
+        One group per configuration, in order of first appearance.
+    """
+    grouped: dict[str, list[tuple[Path, EvalReport]]] = {}
+    for path, report in zip(paths, reports, strict=True):
+        grouped.setdefault(_run_name(report), []).append((path, report))
+    return [
+        RunGroup(
+            name=name,
+            reports=tuple(report for _, report in members),
+            run_files=tuple(path for path, _ in members),
+        )
+        for name, members in grouped.items()
+    ]
+
+
+def _format_spread(value: Spread | None, pattern: str) -> str:
+    """Render a number as mean ± standard deviation.
+
+    Args:
+        value: Spread over the runs, or None if the number does not exist.
+        pattern: Format of one value, e.g. ".1%" or ".2f".
+
+    Returns:
+        E.g. "71.4% ± 2.4%"; the mean alone for a single run; "n/a" if missing.
+    """
+    if value is None:
+        return NOT_APPLICABLE
+    if value.runs < 2:
+        return format(value.mean, pattern)
+    return f"{format(value.mean, pattern)} ± {format(value.stdev, pattern)}"
+
+
+def _judge_score(group: RunGroup) -> str:
+    """Look up the judge's mean score for a group's runs.
+
+    Args:
+        group: Runs of one configuration.
+
+    Returns:
+        The mean over the group's judged runs with the judge model, or "not judged".
+    """
+    judged = [report for path in group.run_files if (report := load_judge_report(path))]
+    scores = [report.mean_score for report in judged if report.mean_score is not None]
+    if not scores:
+        return NOT_JUDGED
+    return f"{sum(scores) / len(scores):.2f} ({judged[0].judge_model})"
+
+
+def format_reference_table(groups: Sequence[RunGroup]) -> str:
+    """Render the table with one row per configuration and the spread over its runs.
+
+    Args:
+        groups: Groups from ``group_runs``.
+
+    Returns:
+        A Markdown table: the majority baseline, then one row per configuration with
+        accuracy, mean weighted error, APPLY recall and kappa as mean ± standard
+        deviation over its runs.
+
+    Raises:
+        CompareError: If there are no groups or the first run has no majority baseline.
+    """
+    if not groups:
+        raise CompareError("Give at least one run file.")
+    majority = next((b for b in groups[0].reports[0].baselines if b.is_majority), None)
+    if majority is None:
+        raise CompareError("The first run file has no majority baseline.")
+    scores = majority.scores
+    apply_recall = scores.per_class["APPLY"].recall if scores.per_class else None
+    kappa = NOT_APPLICABLE if scores.kappa is None else f"{scores.kappa:.2f}"
+    recall = NOT_APPLICABLE if apply_recall is None else f"{apply_recall:.1%}"
+    lines = [
+        REFERENCE_TABLE_HEADER,
+        REFERENCE_TABLE_DIVIDER,
+        f"| {BASELINE_NAME} (always {majority.label}) | – | {scores.accuracy:.1%} | "
+        f"{scores.weighted_error_mean:.2f} | {recall} | {kappa} | $0.00 | 0.0 s | – |",
+    ]
+    for group in groups:
+        numbers = summarize_runs(group.reports)
+        cost = numbers.get(COST_PER_100)
+        lines.append(
+            f"| {group.name} | {len(group.reports)} | "
+            f"{_format_spread(numbers.get(ACCURACY), '.1%')} | "
+            f"{_format_spread(numbers.get(WEIGHTED_ERROR), '.2f')} | "
+            f"{_format_spread(numbers.get(APPLY_RECALL), '.1%')} | "
+            f"{_format_spread(numbers.get(KAPPA), '.2f')} | "
+            f"{UNKNOWN_COST if cost is None else f'${cost.mean:.2f}'} | "
+            f"{numbers[LATENCY].mean:.1f} s | {_judge_score(group)} |"
+        )
+    return "\n".join(lines)
+
+
+def noise_figure(groups: Sequence[RunGroup]) -> float:
+    """Find how much the mean weighted error moves between runs of one configuration.
+
+    Args:
+        groups: Groups from ``group_runs``.
+
+    Returns:
+        The largest standard deviation of the mean weighted error among the groups;
+        0 if no configuration was run more than once. A difference between two
+        configurations that is smaller than this is not evidence of an improvement.
+    """
+    return max(
+        (summarize_runs(group.reports)[WEIGHTED_ERROR].stdev for group in groups), default=0.0
+    )
+
+
+def format_cost_matrix_table(groups: Sequence[RunGroup]) -> str:
+    """Render the mean weighted error of each configuration under three cost matrices.
+
+    The predictions are the same under every matrix; only their price changes, so no
+    model call is needed.
+
+    Args:
+        groups: Groups from ``group_runs``.
+
+    Returns:
+        A Markdown table with the rank of each configuration per matrix, followed by a
+        line saying whether the best configuration is the same under all of them.
+    """
+    names = [DEFAULT_COSTS_NAME, *ALTERNATIVE_COSTS]
+    values: dict[str, list[float]] = {name: [] for name in names}
+    for group in groups:
+        numbers = summarize_runs(group.reports)
+        values[DEFAULT_COSTS_NAME].append(numbers[WEIGHTED_ERROR].mean)
+        for name in ALTERNATIVE_COSTS:
+            values[name].append(numbers[f"weighted error, {name}"].mean)
+    lines = ["| Configuration | " + " | ".join(names) + " |", "|---" * (len(names) + 1) + "|"]
+    for index, group in enumerate(groups):
+        cells = []
+        for name in names:
+            rank = sorted(values[name]).index(values[name][index]) + 1
+            cells.append(f"{values[name][index]:.2f} (rank {rank})")
+        lines.append(f"| {group.name} | " + " | ".join(cells) + " |")
+    best = {groups[values[name].index(min(values[name]))].name for name in names}
+    verdict = (
+        f"The best configuration is the same under all three matrices: {next(iter(best))}."
+        if len(best) == 1
+        else "The best configuration depends on the cost matrix: " + ", ".join(sorted(best)) + "."
+    )
+    return "\n".join([*lines, "", verdict])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Print the comparison table for the given run files.
 
@@ -288,19 +483,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=TABLES,
         default=MODELS_TABLE,
         help="models: one row per model run, with the Pareto front. "
-        "versions: workflow vs. agent, with model and tool calls.",
+        "versions: workflow vs. agent, with model and tool calls. "
+        "reference: one row per configuration with mean and spread over its runs. "
+        "costs: the ranking under three cost matrices.",
     )
     args = parser.parse_args(argv)
     try:
         reports = load_runs(args.runs)
         rows = rows_from_reports(reports)
-    except (OSError, CompareError) as err:
+        groups = group_runs(args.runs, reports)
+        if args.table == REFERENCE_TABLE:
+            print(format_reference_table(groups))
+            noise = noise_figure(groups)
+            print(f"\nNoise figure (largest stdev of mean weighted error): {noise:.3f}")
+        elif args.table == COSTS_TABLE:
+            print(format_cost_matrix_table(groups))
+        elif args.table == VERSIONS_TABLE:
+            print(format_version_table(reports))
+        else:
+            print(format_markdown_table(rows))
+    except (OSError, KeyError, CompareError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
-    if args.table == VERSIONS_TABLE:
-        print(format_version_table(reports))
-    else:
-        print(format_markdown_table(rows))
     return 0
 
 

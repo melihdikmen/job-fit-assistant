@@ -9,7 +9,7 @@ from dataclasses import dataclass
 TOKENS_PER_MILLION = 1_000_000
 
 # Date the table below was last compared with the providers' pricing pages.
-PRICES_CHECKED_ON = "2026-11-11"
+PRICES_CHECKED_ON = "2026-11-22"
 
 # A model run on the candidate's own machine has no price per token (electricity and
 # hardware are not counted).
@@ -35,7 +35,7 @@ FREE = ModelPrice(input_usd_per_million=0.0, output_usd_per_million=0.0)
 # cost differently on another provider. Gemini prices are tiered by prompt size; the
 # tier below 200k prompt tokens applies, since prompts here are about 2.3k tokens.
 # Source for Gemini: the Vertex AI pricing page, standard tier, Global region (runs use
-# the global location; other regions cost 10% more), read on 2026-11-11:
+# the global location; other regions cost 10% more), read on 2026-11-22:
 # https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
 # gemini-4-carbon is at a promotional price through 2026-11-30 (given as 50% credits
 # back on spend); from 2026-12-01 it is 4.00 / 20.00.

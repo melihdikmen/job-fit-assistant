@@ -9,6 +9,60 @@ Seniority = Literal["intern", "junior", "mid", "senior", "lead", "unknown"]
 DecisionLabel = Literal["APPLY", "PREPARE", "SKIP"]
 
 
+MIN_RATIONALE_SCORE = 1
+MAX_RATIONALE_SCORE = 5
+
+
+class RationaleScore(BaseModel):
+    """A judge model's rating of one decision's rationale against the rubric.
+
+    Field order is intentional, as in ``JobDecision``: the judge explains first, then
+    answers the yes/no criteria, and gives the overall score last.
+    """
+
+    reasoning: str = Field(
+        description=(
+            "Think first: 2 to 4 sentences on how well the rationale explains the "
+            "decision, checked against the posting and the CV."
+        )
+    )
+    names_matching_skills: bool = Field(
+        description=(
+            "True if the rationale names at least one concrete requirement of the posting "
+            "that the CV covers, or correctly says that there is none."
+        )
+    )
+    names_missing_skills: bool = Field(
+        description=(
+            "True if the rationale names the concrete gaps between the posting and the CV, "
+            "or correctly says that there are none."
+        )
+    )
+    reflects_hard_rules: bool = Field(
+        description=(
+            "True if every hard rule listed as fired is stated in the rationale, or no rule fired."
+        )
+    )
+    mentions_english_risk: bool = Field(
+        description=(
+            "True if the posting demands fluent or advanced English and the rationale "
+            "says so, or the posting makes no such demand."
+        )
+    )
+    consistent_with_decision: bool = Field(
+        description="True if the reasoning given leads to the final decision that was made."
+    )
+    score: int = Field(
+        ge=MIN_RATIONALE_SCORE,
+        le=MAX_RATIONALE_SCORE,
+        description=(
+            "Overall quality from 1 to 5. 5: specific, accurate and complete. 3: correct "
+            "but generic or missing one criterion. 1: wrong about the posting or the CV, "
+            "or contradicts the decision."
+        ),
+    )
+
+
 class JobDecision(BaseModel):
     """Structured decision about one job posting for one candidate.
 

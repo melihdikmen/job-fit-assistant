@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, LLMResponse, generate_json
 from job_fit.rules import apply_rules
 from job_fit.schema import DecisionLabel, JobDecision
+from job_fit.tracing import flush, trace_scope
 
 LLMCall = Callable[..., LLMResponse]
 DecideFn = Callable[..., "DecisionResult"]
@@ -28,6 +29,8 @@ DEFAULT_REASONING: ReasoningSetting = "default"
 DEFAULT_PROVIDER = "vertex"
 DEFAULT_CV_PATH = Path("data/cv.md")
 MAX_ATTEMPTS = 2
+# Trace tag for a decision made from the command line, outside any eval.
+CLI_EXPERIMENT = "cli"
 
 SYSTEM_PROMPT = """\
 You are a careful recruiter's assistant. You compare one job posting with one candidate's CV
@@ -335,14 +338,18 @@ def run_cli(argv: Sequence[str] | None, decide_fn: DecideFn, description: str) -
     try:
         posting_text = args.posting.read_text(encoding="utf-8")
         cv = args.cv.read_text(encoding="utf-8")
-        result = decide_fn(
-            posting_text,
-            cv,
-            model=args.model,
-            provider=args.provider,
-            reasoning=reasoning_flag(args.reasoning),
-            timeout_s=args.timeout_s,
-        )
+        # The trace is tagged with the deciding function: "decide" or "decide_with_agent".
+        version = getattr(decide_fn, "__name__", type(decide_fn).__name__)
+        with trace_scope(cv=cv, experiment=CLI_EXPERIMENT, version=version):
+            result = decide_fn(
+                posting_text,
+                cv,
+                model=args.model,
+                provider=args.provider,
+                reasoning=reasoning_flag(args.reasoning),
+                timeout_s=args.timeout_s,
+            )
+        flush()
     except (OSError, ValueError, LLMError, DecisionError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

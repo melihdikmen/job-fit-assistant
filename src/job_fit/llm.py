@@ -1,8 +1,10 @@
 """Single entry point for LLM calls.
 
-This is the only module that imports a provider SDK or reads ``.env``. The workflow
-calls ``generate_json``; the agent gets its LangChain chat model from ``chat_model``.
-Neither cares which provider answers.
+This is the only module that imports a provider SDK or reads the provider settings from
+``.env``. The workflow calls ``generate_json``; the agent gets its LangChain chat model
+from ``chat_model``. Neither cares which provider answers.
+
+Calls made inside a ``tracing.trace_scope`` are recorded in Langfuse if it is configured.
 """
 
 import os
@@ -21,6 +23,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from pydantic import BaseModel
+
+from job_fit.tracing import traced_generation
 
 Provider = Literal["vertex", "openrouter", "ollama"]
 
@@ -418,12 +422,25 @@ def generate_json(
         ValueError: If the provider name is unknown.
         LLMError: If the provider is misconfigured or the call fails.
     """
-    if provider == "vertex":
-        return _generate_vertex(_vertex_client(), model, system, user, schema, reasoning, timeout_s)
-    if provider in OPENAI_COMPATIBLE_PROVIDERS:
-        extra_body = _extra_body(provider, model, reasoning)
-        client = _openai_compatible_client(provider)
-        return _generate_openai_compatible(
-            client, model, system, user, schema, timeout_s, extra_body
-        )
-    raise ValueError(f"Unknown provider '{provider}'. Use 'vertex', 'openrouter' or 'ollama'.")
+    if provider != "vertex" and provider not in OPENAI_COMPATIBLE_PROVIDERS:
+        raise ValueError(f"Unknown provider '{provider}'. Use 'vertex', 'openrouter' or 'ollama'.")
+    # Recorded only inside a trace scope and only if tracing is configured.
+    with traced_generation(
+        provider=provider, model=model, system=system, user=user, reasoning=reasoning
+    ) as recorder:
+        if provider == "vertex":
+            response = _generate_vertex(
+                _vertex_client(), model, system, user, schema, reasoning, timeout_s
+            )
+        else:
+            response = _generate_openai_compatible(
+                _openai_compatible_client(provider),
+                model,
+                system,
+                user,
+                schema,
+                timeout_s,
+                _extra_body(provider, model, reasoning),
+            )
+        recorder.finish(response.text, response.input_tokens, response.output_tokens)
+    return response

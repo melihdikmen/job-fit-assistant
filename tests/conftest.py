@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from job_fit import tracing
+
 
 class NetworkAccessError(RuntimeError):
     """A test tried to open a network connection."""
@@ -33,3 +35,12 @@ def block_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+
+
+@pytest.fixture(autouse=True)
+def tracing_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test from tracing to Langfuse, whatever the developer's ``.env`` holds.
+
+    Tests of the tracing itself replace this with a client that exports to memory.
+    """
+    monkeypatch.setattr(tracing, "_client", lambda: None)

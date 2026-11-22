@@ -8,14 +8,20 @@ import pytest
 from job_fit.compare import (
     CompareError,
     Row,
+    format_cost_matrix_table,
     format_markdown_table,
+    format_reference_table,
     format_version_table,
+    group_runs,
     load_runs,
     main,
+    noise_figure,
     pareto_front,
     rows_from_reports,
 )
 from job_fit.eval import EvalReport, PostingResult, build_report, save_report
+from job_fit.judge import JudgeReport, judge_file_for
+from job_fit.metrics import ERROR_COSTS, MISSED_APPLY, spread
 from job_fit.workflow import ToolCallRecord
 
 STARTED_AT = datetime(2026, 11, 10, 15, 30, 5)
@@ -334,3 +340,144 @@ def test_main_prints_the_version_table_on_request(
     assert exit_code == 0
     assert "| Agent, run 1 |" in output
     assert "Baseline" not in output
+
+
+def _saved_group(tmp_path: Path, model: str, *runs: list[str | None]) -> tuple[list[Path], list]:
+    """Save repeated runs of one model and return their paths and reports.
+
+    Args:
+        tmp_path: Folder to write into.
+        model: Model id of the runs.
+        *runs: Predictions of each run for ``LABELS``.
+
+    Returns:
+        The run files and the reports, in run order.
+    """
+    reports = [_report(model, predictions) for predictions in runs]
+    paths = [_save(report, tmp_path, f"{model}-{index}") for index, report in enumerate(reports)]
+    return paths, reports
+
+
+def test_group_runs_puts_repeated_runs_of_a_configuration_together(tmp_path: Path) -> None:
+    """Runs with the same model and settings form one group, in order of appearance."""
+    flash_paths, flash = _saved_group(tmp_path, "flash", LABELS, LABELS)
+    lite_paths, lite = _saved_group(tmp_path, "lite", LABELS)
+
+    groups = group_runs([flash_paths[0], *lite_paths, flash_paths[1]], [flash[0], *lite, flash[1]])
+
+    assert [(group.name, len(group.reports)) for group in groups] == [("flash", 2), ("lite", 1)]
+    assert groups[0].run_files == (flash_paths[0], flash_paths[1])
+
+
+def test_reference_table_shows_mean_and_spread_per_configuration(tmp_path: Path) -> None:
+    """Repeated runs become one row with mean ± stdev; the baseline has kappa 0."""
+    perfect = list(LABELS)
+    one_wrong = ["SKIP", *LABELS[1:]]
+    paths, reports = _saved_group(tmp_path, "flash", perfect, one_wrong)
+    accuracy = spread([report.final.accuracy for report in reports])
+
+    table = format_reference_table(group_runs(paths, reports))
+
+    lines = table.splitlines()
+    assert lines[0].startswith("| Configuration | Runs | Accuracy |")
+    assert lines[2].startswith("| Baseline (always SKIP) | – | 50.0% |")
+    assert "| 0.00 | $0.00 |" in lines[2]
+    assert lines[3].startswith(f"| flash | 2 | {accuracy.mean:.1%} ± {accuracy.stdev:.1%} |")
+    assert "50.0% ± 70.7%" in lines[3]
+    assert lines[3].endswith("| not judged |")
+
+
+def test_reference_table_shows_a_single_run_without_a_spread(tmp_path: Path) -> None:
+    """One run has a value but no deviation to print."""
+    paths, reports = _saved_group(tmp_path, "flash", list(LABELS))
+
+    table = format_reference_table(group_runs(paths, reports))
+
+    assert "| flash | 1 | 100.0% | 0.00 | 100.0% | 1.00 |" in table
+    assert "±" not in table
+
+
+def test_reference_table_shows_the_judge_score_of_a_judged_run(tmp_path: Path) -> None:
+    """A judge report saved next to a run file fills the last column."""
+    paths, reports = _saved_group(tmp_path, "flash", list(LABELS))
+    judge_report = JudgeReport(
+        judge_model="judge-model",
+        provider="vertex",
+        judged_model="flash",
+        run_file=paths[0].as_posix(),
+        rubric_sha256="x",
+        judged=4,
+        failed=0,
+        mean_score=3.5,
+        criterion_pass_rates={},
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=None,
+        mean_latency_s=0.0,
+        records=[],
+    )
+    judge_file_for(paths[0]).write_text(judge_report.model_dump_json(), encoding="utf-8")
+
+    table = format_reference_table(group_runs(paths, reports))
+
+    assert table.endswith("| 3.50 (judge-model) |")
+
+
+def test_noise_figure_is_the_largest_spread_of_weighted_error(tmp_path: Path) -> None:
+    """The figure comes from the configuration whose runs differ most."""
+    stable_paths, stable = _saved_group(tmp_path, "stable", list(LABELS), list(LABELS))
+    noisy_paths, noisy = _saved_group(tmp_path, "noisy", list(LABELS), ["SKIP", *LABELS[1:]])
+    expected = spread([report.final.weighted_error_mean for report in noisy]).stdev
+
+    groups = group_runs([*stable_paths, *noisy_paths], [*stable, *noisy])
+
+    assert expected > 0
+    assert noise_figure(groups) == expected
+    assert noise_figure(groups[:1]) == 0.0
+
+
+def test_cost_matrix_table_reports_a_ranking_that_depends_on_the_matrix(tmp_path: Path) -> None:
+    """A model that misses an APPLY loses to one that wastes applications once a miss costs 5."""
+    # LABELS is APPLY, SKIP, SKIP, PREPARE.
+    misses_apply = ["SKIP", "SKIP", "SKIP", "PREPARE"]
+    wastes_three = ["APPLY", "APPLY", "APPLY", "APPLY"]
+    miss_paths, miss = _saved_group(tmp_path, "strict", misses_apply)
+    waste_paths, waste = _saved_group(tmp_path, "eager", wastes_three)
+
+    table = format_cost_matrix_table(group_runs([*miss_paths, *waste_paths], [*miss, *waste]))
+
+    default_name = f"missed APPLY = {ERROR_COSTS[MISSED_APPLY]} (default)"
+    assert f"| Configuration | {default_name} | missed APPLY = 2 | missed APPLY = 5 |" in table
+    # strict: one missed APPLY, cost 3 / 2 / 5 over four postings; eager: three errors of cost 1.
+    assert "| strict | 0.75 (rank 1) | 0.50 (rank 1) | 1.25 (rank 2) |" in table
+    assert "| eager | 0.75 (rank 1) | 0.75 (rank 2) | 0.75 (rank 1) |" in table
+    assert "depends on the cost matrix: eager, strict." in table
+
+
+def test_cost_matrix_table_says_when_the_best_configuration_is_stable(tmp_path: Path) -> None:
+    """A configuration that wins under every matrix is named once."""
+    good_paths, good = _saved_group(tmp_path, "good", list(LABELS))
+    bad_paths, bad = _saved_group(tmp_path, "bad", ["SKIP", "SKIP", "SKIP", "SKIP"])
+
+    table = format_cost_matrix_table(group_runs([*good_paths, *bad_paths], [*good, *bad]))
+
+    assert "The best configuration is the same under all three matrices: good." in table
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        ("reference", "Noise figure (largest stdev of mean weighted error): 0.000"),
+        ("costs", "rank 1"),
+    ],
+)
+def test_main_prints_the_week_2_tables_on_request(
+    table: str, expected: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--table reference`` and ``--table costs`` switch to the new tables."""
+    paths, _ = _saved_group(tmp_path, "flash", list(LABELS))
+
+    exit_code = main([str(paths[0]), "--table", table])
+
+    assert exit_code == 0
+    assert expected in capsys.readouterr().out

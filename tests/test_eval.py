@@ -9,16 +9,21 @@ from typing import Any
 import pytest
 
 from job_fit import eval as eval_module
-from job_fit.dataset import Posting
+from job_fit.dataset import MIN_DEV_PER_LABEL, MIN_DEV_POSTINGS, Posting
 from job_fit.eval import (
     EvalError,
     build_report,
+    check_heldout_access,
     evaluate,
     format_report,
+    headline_numbers,
     main,
     save_report,
+    summarize_runs,
 )
-from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError
+from job_fit.judge import CRITERIA
+from job_fit.llm import DEFAULT_TIMEOUT_S, LLMError, LLMResponse
+from job_fit.metrics import spread
 from job_fit.schema import JobDecision
 from job_fit.workflow import DecisionError, DecisionResult, ToolCallRecord
 
@@ -425,7 +430,12 @@ def _write_inputs(tmp_path: Path, labels: list[str]) -> list[str]:
     ]
 
 
-COMPLETE_LABELS = ["APPLY"] * 7 + ["PREPARE"] * 6 + ["SKIP"] * 7
+# A dev set that meets the size and balance eval asks for.
+COMPLETE_LABELS = (
+    ["APPLY"] * MIN_DEV_PER_LABEL
+    + ["PREPARE"] * MIN_DEV_PER_LABEL
+    + ["SKIP"] * (MIN_DEV_POSTINGS - 2 * MIN_DEV_PER_LABEL)
+)
 
 
 def test_main_prints_metrics_and_saves_the_run(
@@ -439,12 +449,13 @@ def test_main_prints_metrics_and_saves_the_run(
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "[20/20] p-19 label=SKIP predicted=SKIP" in output
-    assert "always APPLY (majority)" in output
+    size = len(COMPLETE_LABELS)
+    assert f"[{size}/{size}] p-{size - 1} label=SKIP predicted=SKIP" in output
+    assert "always SKIP (majority)" in output
     run_file = tmp_path / "results" / f"2026-11-10_153005_{MODEL}.json"
     saved = json.loads(run_file.read_text(encoding="utf-8"))
     assert saved["final"]["accuracy"] == 1.0
-    assert saved["dataset_size"] == 20
+    assert saved["dataset_size"] == len(COMPLETE_LABELS)
     assert len(saved["dataset_sha256"]) == 64
     assert {"final", "before_rules", "baselines", "cost_usd", "results"} <= set(saved)
 
@@ -483,7 +494,8 @@ def test_main_runs_an_incomplete_set_when_allowed(
     exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
 
     assert exit_code == 0
-    assert "WARNING:  incomplete test set: 2 postings, need at least 20" in capsys.readouterr().out
+    warning = f"WARNING:  incomplete test set: 2 postings, need at least {MIN_DEV_POSTINGS}"
+    assert warning in capsys.readouterr().out
 
 
 def test_main_limit_evaluates_only_the_first_postings(tmp_path: Path) -> None:
@@ -670,7 +682,7 @@ def test_main_version_agent_runs_the_agent_and_hashes_its_prompt(
     run_file = tmp_path / "results" / f"2026-11-10_153005_{MODEL}_agent_reasoning-on.json"
     saved = json.loads(run_file.read_text(encoding="utf-8"))
     assert exit_code == 0
-    assert len(fake.calls) == 20
+    assert len(fake.calls) == len(COMPLETE_LABELS)
     assert saved["version"] == "agent"
     assert saved["prompt_sha256"] != eval_module.workflow_prompt_sha256()
     assert saved["results"][0]["tool_calls"][0] == {
@@ -692,5 +704,259 @@ def test_main_default_version_runs_the_workflow(
 
     saved_text = next((tmp_path / "results").iterdir()).read_text(encoding="utf-8")
     assert exit_code == 0
-    assert len(fake.calls) == 20
+    assert len(fake.calls) == len(COMPLETE_LABELS)
     assert json.loads(saved_text)["version"] == "workflow"
+
+
+def test_formatted_report_shows_precision_recall_and_kappa() -> None:
+    """The report prints the per-class table and kappa next to the baseline's zero."""
+    postings = [_posting("a", "APPLY"), _posting("b", "APPLY"), _posting("c", "SKIP")]
+    fake = FakeDecide(_decision_result("APPLY"), _decision_result("SKIP"), _decision_result("SKIP"))
+
+    text = format_report(_report(postings, fake))
+
+    rows = [line.split() for line in text.splitlines()]
+    assert ["precision", "recall", "labeled", "predicted"] in rows
+    assert ["APPLY", "100.0%", "50.0%", "2", "1"] in rows
+    assert ["PREPARE", "n/a", "n/a", "0", "0"] in rows
+    assert ["SKIP", "50.0%", "100.0%", "1", "2"] in rows
+    assert "kappa:    0.40 for the model, 0.00 for the majority baseline" in text
+    assert "w.err if missed APPLY = 5: 1.67 for the model" in text
+
+
+def test_headline_numbers_leave_out_what_does_not_exist() -> None:
+    """Precision of a label that was never predicted is absent, not zero."""
+    postings = [_posting("a", "APPLY"), _posting("b", "SKIP")]
+    report = _report(postings, FakeDecide(_decision_result("SKIP"), _decision_result("SKIP")))
+
+    numbers = headline_numbers(report)
+
+    assert numbers["recall APPLY"] == 0.0
+    assert "precision APPLY" not in numbers
+    assert numbers["accuracy"] == 0.5
+    assert numbers["weighted error (mean)"] == report.final.weighted_error_mean
+    assert numbers["weighted error, missed APPLY = 5"] == 5 / 2
+
+
+def test_summarize_runs_reports_the_spread_between_runs() -> None:
+    """Two runs that differ on one posting show up as a non-zero standard deviation."""
+    postings = [_posting("a", "APPLY"), _posting("b", "SKIP")]
+    right = _report(postings, FakeDecide(_decision_result("APPLY"), _decision_result("SKIP")))
+    wrong = _report(postings, FakeDecide(_decision_result("SKIP"), _decision_result("SKIP")))
+
+    numbers = summarize_runs([right, wrong])
+
+    assert numbers["accuracy"] == spread([1.0, 0.5])
+    assert numbers["weighted error (mean)"].maximum == wrong.final.weighted_error_mean
+    assert numbers["weighted error (mean)"].stdev > 0
+    # Precision of APPLY exists only in the run that predicted APPLY, so it is dropped.
+    assert "precision APPLY" not in numbers
+
+
+def test_summarize_runs_needs_at_least_one_run() -> None:
+    """An empty list of runs cannot be summarized."""
+    with pytest.raises(ValueError, match="empty"):
+        summarize_runs([])
+
+
+def test_prompt_hash_covers_the_schema_descriptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Changing a field description changes the hash, for the workflow and the agent."""
+    workflow_before = eval_module.workflow_prompt_sha256()
+    agent_before = eval_module.agent_prompt_sha256(CV)
+
+    monkeypatch.setattr(eval_module, "schema_fingerprint", lambda: "a different schema")
+
+    assert eval_module.workflow_prompt_sha256() != workflow_before
+    assert eval_module.agent_prompt_sha256(CV) != agent_before
+
+
+def test_schema_fingerprint_contains_the_field_descriptions() -> None:
+    """The fingerprint is the schema as sent to the model, descriptions included."""
+    description = JobDecision.model_fields["decision"].description
+
+    assert description is not None
+    assert json.dumps(description)[1:-1] in eval_module.schema_fingerprint()
+
+
+def test_main_records_experiment_and_cv_hash(tmp_path: Path) -> None:
+    """The run file carries the experiment name and a hash of the CV, not the CV."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--experiment", "week2-reference"]
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+
+    main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    saved = json.loads(next((tmp_path / "results").iterdir()).read_text(encoding="utf-8"))
+    assert saved["experiment"] == "week2-reference"
+    assert saved["run_index"] == 1
+    assert saved["cv_sha256"] == eval_module.sha256_text(CV)
+
+
+def test_main_names_the_experiment_after_the_settings_by_default(tmp_path: Path) -> None:
+    """Without ``--experiment`` the name says version, model and reasoning."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--reasoning", "on"]
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+
+    main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    saved = json.loads(next((tmp_path / "results").iterdir()).read_text(encoding="utf-8"))
+    assert saved["experiment"] == f"workflow_{MODEL}_reasoning-on"
+
+
+def test_main_repeats_the_configuration_and_saves_a_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--runs 3`` writes three numbered run files and one summary with the spread."""
+    runs = 3
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--runs", str(runs)]
+    perfect = [_decision_result(label) for label in COMPLETE_LABELS]
+    one_wrong = [_decision_result("SKIP"), *perfect[1:]]
+    fake = FakeDecide(*perfect, *one_wrong, *perfect)
+
+    exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    results = tmp_path / "results"
+    names = sorted(path.name for path in results.iterdir())
+    stem = f"2026-11-10_153005_{MODEL}"
+    summary = json.loads((results / f"{stem}_summary.json").read_text(encoding="utf-8"))
+    size = len(COMPLETE_LABELS)
+    assert exit_code == 0
+    assert names == [f"{stem}_run-{n}.json" for n in range(1, runs + 1)] + [f"{stem}_summary.json"]
+    assert len(fake.calls) == runs * size
+    assert summary["numbers"]["accuracy"]["runs"] == runs
+    assert summary["numbers"]["accuracy"]["minimum"] == (size - 1) / size
+    assert summary["numbers"]["accuracy"]["maximum"] == 1.0
+    assert summary["numbers"]["accuracy"]["stdev"] > 0
+    assert len(summary["run_files"]) == runs
+    output = capsys.readouterr().out
+    assert f"Summary of {runs} run(s)" in output
+    assert "run 2 of 3" in output
+
+
+def test_main_rejects_a_non_positive_number_of_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--runs 0`` is a usage error."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--runs", "0"]
+
+    assert main(argv, decide_fn=FakeDecide(), clock=lambda: STARTED_AT) == 1
+    assert "--runs must be at least 1" in capsys.readouterr().err
+
+
+def _write_heldout(tmp_path: Path, *ids: str) -> Path:
+    """Write a held-out file holding the given posting ids.
+
+    Args:
+        tmp_path: Folder to write into.
+        *ids: Posting ids that are held out.
+
+    Returns:
+        The path of the file.
+    """
+    path = tmp_path / "heldout.jsonl"
+    rows = [_posting(posting_id, "SKIP").model_dump_json() for posting_id in ids]
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_main_refuses_held_out_postings(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A set that contains a held-out posting is not evaluated, and no model is called."""
+    heldout = _write_heldout(tmp_path, "p-3", "other")
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--heldout", str(heldout)]
+    fake = FakeDecide()
+
+    exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    assert exit_code == 1
+    assert fake.calls == []
+    assert "held out" in capsys.readouterr().err
+    assert not (tmp_path / "results").exists()
+
+
+def test_main_evaluates_the_held_out_set_only_with_the_explicit_flag(tmp_path: Path) -> None:
+    """``--final-heldout`` lifts the guard and does not ask for a full-size set."""
+    labels = ["APPLY", "SKIP"]
+    argv = _write_inputs(tmp_path, labels)
+    heldout = _write_heldout(tmp_path, "p-0", "p-1")
+    fake = FakeDecide(*[_decision_result(label) for label in labels])
+
+    exit_code = main(
+        [*argv, "--heldout", str(heldout), "--final-heldout"],
+        decide_fn=fake,
+        clock=lambda: STARTED_AT,
+    )
+
+    saved = json.loads(next((tmp_path / "results").iterdir()).read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert len(fake.calls) == len(labels)
+    assert saved["coverage_problems"] == []
+
+
+def test_check_heldout_access_allows_a_set_without_held_out_postings(tmp_path: Path) -> None:
+    """Dev postings pass the guard; a missing held-out file means nothing to guard."""
+    heldout = _write_heldout(tmp_path, "other")
+
+    check_heldout_access([_posting("a", "APPLY")], heldout, False)
+    check_heldout_access([_posting("other", "APPLY")], tmp_path / "missing.jsonl", False)
+
+
+def _judge_answer(score: int) -> str:
+    """Build a valid judge answer with every criterion met.
+
+    Args:
+        score: Overall score.
+
+    Returns:
+        The answer as JSON text.
+    """
+    criteria = {name: True for name in CRITERIA}
+    return json.dumps({"reasoning": "Checked.", **criteria, "score": score})
+
+
+def test_main_judges_the_last_run_and_reports_the_score(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--judge`` rates the rationales of the last run and adds the score to the summary."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--judge", "--judge-model", "judge-model"]
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+    judge_calls: list[str] = []
+
+    def judge_llm(provider: str, model: str, system: str, user: str, schema: Any, **_: Any) -> Any:
+        """Answer every judge call with a score of 4 and record the model asked.
+
+        Args:
+            provider: Provider of the judge.
+            model: Judge model id.
+            system: System prompt.
+            user: User prompt.
+            schema: Expected schema.
+            **_: Further options.
+
+        Returns:
+            A canned judge response.
+        """
+        judge_calls.append(model)
+        return LLMResponse(text=_judge_answer(4), input_tokens=10, output_tokens=5, latency_s=1.0)
+
+    exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT, judge_llm=judge_llm)
+
+    results = tmp_path / "results"
+    stem = f"2026-11-10_153005_{MODEL}"
+    summary = json.loads((results / f"{stem}_summary.json").read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert judge_calls == ["judge-model"] * len(COMPLETE_LABELS)
+    assert (results / f"{stem}.judge.json").exists()
+    assert (summary["judge_model"], summary["judge_mean_score"]) == ("judge-model", 4.0)
+    assert "judge score (one run, by judge-model): 4.00" in capsys.readouterr().out
+
+
+def test_main_refuses_a_judge_that_is_the_judged_model(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Asking a model to judge its own rationales is an error, reported after the run."""
+    argv = _write_inputs(tmp_path, COMPLETE_LABELS) + ["--judge", "--judge-model", MODEL]
+    fake = FakeDecide(*[_decision_result(label) for label in COMPLETE_LABELS])
+
+    exit_code = main(argv, decide_fn=fake, clock=lambda: STARTED_AT)
+
+    assert exit_code == 1
+    assert "its own output" in capsys.readouterr().err

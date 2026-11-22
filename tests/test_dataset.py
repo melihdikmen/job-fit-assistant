@@ -7,13 +7,28 @@ from typing import Any
 import pytest
 
 from job_fit.dataset import (
+    HELDOUT_SHARE,
+    MIN_DEV_PER_LABEL,
+    MIN_DEV_POSTINGS,
+    MIN_PER_LABEL,
+    MIN_POSTINGS,
     DatasetError,
+    LabelRecord,
     Posting,
     add_posting,
+    apply_labels,
     check_coverage,
+    format_agreement,
+    heldout_size,
     label_counts,
+    label_session,
+    labeling_order,
+    load_label_log,
     load_postings,
     main,
+    parse_label,
+    split_postings,
+    write_postings,
 )
 
 
@@ -145,22 +160,24 @@ def test_label_counts_include_labels_with_no_postings() -> None:
 
 
 def test_complete_set_has_no_coverage_problems() -> None:
-    """Twenty postings with at least five per label pass."""
-    assert check_coverage(_postings(8, 5, 7)) == []
+    """A set with the required size and the required number per label passes."""
+    assert check_coverage(_postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_POSTINGS)) == []
 
 
 def test_small_set_is_reported() -> None:
-    """Fewer than twenty postings is a shortfall."""
-    problems = check_coverage(_postings(5, 5, 5))
+    """Fewer postings than required is a shortfall."""
+    size = MIN_PER_LABEL * 3
+    problems = check_coverage(_postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_PER_LABEL))
 
-    assert problems == ["15 postings, need at least 20"]
+    assert problems == [f"{size} postings, need at least {MIN_POSTINGS}"]
 
 
 def test_unbalanced_set_is_reported_per_label() -> None:
-    """A label with fewer than five postings is named."""
-    problems = check_coverage(_postings(14, 4, 6))
+    """A label with fewer postings than required is named."""
+    short = MIN_PER_LABEL - 1
+    problems = check_coverage(_postings(MIN_POSTINGS, short, MIN_PER_LABEL))
 
-    assert problems == ["4 postings labeled PREPARE, need at least 5"]
+    assert problems == [f"{short} postings labeled PREPARE, need at least {MIN_PER_LABEL}"]
 
 
 def test_add_posting_writes_a_row_that_loads_back(tmp_path: Path) -> None:
@@ -240,17 +257,298 @@ def test_cli_check_fails_on_an_incomplete_set(
     exit_code = main(["check", "--data", str(data)])
 
     assert exit_code == 1
-    assert "incomplete: 1 postings, need at least 20" in capsys.readouterr().out
+    assert f"incomplete: 1 postings, need at least {MIN_POSTINGS}" in capsys.readouterr().out
 
 
 def test_cli_check_passes_on_a_complete_set(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The check command exits with 0 when size and balance are met."""
-    rows = [posting.model_dump() for posting in _postings(7, 6, 7)]
+    complete = _postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_POSTINGS)
+    rows = [posting.model_dump() for posting in complete]
     data = _write(tmp_path / "set.jsonl", *rows)
 
     exit_code = main(["check", "--data", str(data)])
 
     assert exit_code == 0
     assert "coverage: ok" in capsys.readouterr().out
+
+
+def test_dev_minimums_are_what_a_complete_set_leaves_after_the_split() -> None:
+    """The dev thresholds follow from the full-set thresholds and the held-out share."""
+    dev, _ = split_postings(_postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_PER_LABEL))
+
+    assert set(label_counts(dev).values()) == {MIN_DEV_PER_LABEL}
+    assert MIN_DEV_POSTINGS == MIN_POSTINGS - heldout_size(MIN_POSTINGS)
+
+
+@pytest.mark.parametrize(("count", "expected"), [(0, 0), (1, 0), (2, 1), (3, 1), (10, 3)])
+def test_heldout_size_keeps_every_label_on_both_sides(count: int, expected: int) -> None:
+    """A label with two or more postings gives at least one to each side."""
+    assert heldout_size(count, HELDOUT_SHARE) == expected
+
+
+def test_split_is_stratified_and_complete() -> None:
+    """Every posting lands on exactly one side and each label is split by the share."""
+    postings = _postings(10, 10, 20)
+
+    dev, heldout = split_postings(postings)
+
+    assert sorted(p.id for p in dev + heldout) == sorted(p.id for p in postings)
+    assert label_counts(heldout) == {"APPLY": 3, "PREPARE": 3, "SKIP": 6}
+    assert label_counts(dev) == {"APPLY": 7, "PREPARE": 7, "SKIP": 14}
+
+
+def test_split_does_not_depend_on_file_order() -> None:
+    """The same postings split the same way however the file is sorted."""
+    postings = _postings(10, 10, 20)
+
+    _, heldout = split_postings(postings)
+    _, heldout_reversed = split_postings(list(reversed(postings)))
+
+    assert {p.id for p in heldout} == {p.id for p in heldout_reversed}
+
+
+def test_split_changes_with_the_seed() -> None:
+    """A different seed picks different held-out postings."""
+    postings = _postings(10, 10, 20)
+
+    _, first = split_postings(postings, seed=1)
+    _, second = split_postings(postings, seed=2)
+
+    assert {p.id for p in first} != {p.id for p in second}
+
+
+def test_write_postings_round_trips(tmp_path: Path) -> None:
+    """Postings written to a file load back unchanged."""
+    path = tmp_path / "data" / "out.jsonl"
+    postings = _postings(1, 1, 1)
+
+    write_postings(path, postings)
+
+    assert load_postings(path) == postings
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [("a", "APPLY"), (" Apply ", "APPLY"), ("P", "PREPARE"), ("skip", "SKIP"), ("x", None)],
+)
+def test_parse_label_accepts_letters_and_words(answer: str, expected: str | None) -> None:
+    """A label can be typed as its first letter or in full, in any case."""
+    assert parse_label(answer) == expected
+
+
+def test_labeling_order_is_fixed_and_not_the_file_order() -> None:
+    """Postings are shown in a repeatable shuffled order."""
+    postings = _postings(5, 5, 5)
+
+    first = [p.id for p in labeling_order(postings)]
+    second = [p.id for p in labeling_order(list(reversed(postings)))]
+
+    assert first == second
+    assert first != [p.id for p in postings]
+
+
+class FakeTerminal:
+    """Stands in for the candidate at the keyboard: scripted answers, recorded output."""
+
+    def __init__(self, *answers: str) -> None:
+        """Store the answers to give, in order.
+
+        Args:
+            *answers: What the candidate types at each prompt.
+        """
+        self.answers = list(answers)
+        self.shown: list[str] = []
+        self.saved: list[LabelRecord] = []
+
+    def ask(self, prompt: str) -> str:
+        """Return the next scripted answer.
+
+        Args:
+            prompt: Prompt shown to the candidate.
+
+        Returns:
+            The scripted answer.
+        """
+        self.shown.append(prompt)
+        return self.answers.pop(0)
+
+    def show(self, text: str) -> None:
+        """Record text printed to the candidate.
+
+        Args:
+            text: Printed text.
+        """
+        self.shown.append(text)
+
+
+def _session(terminal: FakeTerminal, postings: list[Posting], done: frozenset[str]) -> bool:
+    """Run a labeling session against a fake terminal.
+
+    Args:
+        terminal: Scripted candidate.
+        postings: Rows to label.
+        done: Ids labeled earlier.
+
+    Returns:
+        What ``label_session`` returned.
+    """
+    return label_session(
+        postings, done, ask=terminal.ask, show=terminal.show, save=terminal.saved.append
+    )
+
+
+def test_label_session_never_shows_the_suggested_label_or_note() -> None:
+    """Only company, role and text are shown; the row's label and note stay hidden."""
+    posting = Posting(**_row(label="PREPARE", note="HIDDEN-NOTE", text="Posting body."))
+    terminal = FakeTerminal("s", "wrong stack")
+
+    finished = _session(terminal, [posting], frozenset())
+
+    printed = "\n".join(terminal.shown)
+    assert finished is True
+    assert "Posting body." in printed
+    assert "Acme / Senior Mobile Engineer" in printed
+    assert "HIDDEN-NOTE" not in printed
+    assert "PREPARE" not in printed.replace("[p]repare", "")
+    assert terminal.saved == [
+        LabelRecord(id="acme-1", suggested="PREPARE", own="SKIP", note="wrong stack")
+    ]
+
+
+def test_label_session_asks_again_after_an_invalid_answer() -> None:
+    """An answer that is not a label is not saved; the prompt repeats."""
+    terminal = FakeTerminal("maybe", "a", "")
+
+    _session(terminal, [Posting(**_row())], frozenset())
+
+    assert [record.own for record in terminal.saved] == ["APPLY"]
+
+
+def test_label_session_skips_postings_labeled_earlier() -> None:
+    """A second session continues where the first one stopped."""
+    postings = _postings(1, 1, 1)
+    terminal = FakeTerminal("a", "")
+
+    finished = _session(terminal, postings, frozenset({"p-0", "p-1"}))
+
+    assert finished is True
+    assert [record.id for record in terminal.saved] == ["p-2"]
+
+
+def test_label_session_can_be_quit_and_keeps_what_was_saved() -> None:
+    """Quitting ends the session as unfinished without losing earlier answers."""
+    postings = _postings(1, 1, 1)
+    terminal = FakeTerminal("a", "", "q")
+
+    finished = _session(terminal, postings, frozenset())
+
+    assert finished is False
+    assert len(terminal.saved) == 1
+
+
+def test_apply_labels_updates_existing_rows_and_appends_new_ones() -> None:
+    """Own labels replace suggested ones; rows new to the set are added."""
+    existing = [Posting(**_row(id="old", label="APPLY", note="suggested"))]
+    source = [existing[0], Posting(**_row(id="new", label="SKIP", note="suggested"))]
+    records = [
+        LabelRecord(id="old", suggested="APPLY", own="PREPARE", note="mine"),
+        LabelRecord(id="new", suggested="SKIP", own="SKIP", note="also mine"),
+    ]
+
+    merged = apply_labels(existing, source, records)
+
+    assert [(p.id, p.label, p.note) for p in merged] == [
+        ("old", "PREPARE", "mine"),
+        ("new", "SKIP", "also mine"),
+    ]
+    assert existing[0].label == "APPLY"
+
+
+def test_format_agreement_reports_differences_and_kappa() -> None:
+    """Full agreement on a mixed set is kappa 1; each difference is listed."""
+    same = [
+        LabelRecord(id="a", suggested="APPLY", own="APPLY"),
+        LabelRecord(id="b", suggested="SKIP", own="SKIP"),
+    ]
+    differing = [*same, LabelRecord(id="c", suggested="PREPARE", own="SKIP")]
+
+    assert "kappa 1.00" in format_agreement(same)
+    assert "0 differ" in format_agreement(same)
+    assert "c: suggested PREPARE, yours SKIP" in format_agreement(differing)
+
+
+def test_cli_label_writes_own_labels_and_the_log(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Labeling a file of new rows adds them to the test set with the typed labels."""
+    data = _write(tmp_path / "set.jsonl", _row(id="old"))
+    source = _write(tmp_path / "new.jsonl", _row(id="new", label="APPLY", note="suggested"))
+    log = tmp_path / "log.jsonl"
+    terminal = FakeTerminal("s", "not for me")
+
+    exit_code = main(
+        ["label", "--source", str(source), "--data", str(data), "--log", str(log)],
+        ask=terminal.ask,
+    )
+
+    assert exit_code == 0
+    assert [(p.id, p.label, p.note) for p in load_postings(data)] == [
+        ("old", "APPLY", "main stack matches"),
+        ("new", "SKIP", "not for me"),
+    ]
+    assert load_label_log(log) == [
+        LabelRecord(id="new", suggested="APPLY", own="SKIP", note="not for me")
+    ]
+    assert "1 differ from the suggested label" in capsys.readouterr().out
+
+
+def test_cli_label_changes_nothing_until_every_row_is_labeled(tmp_path: Path) -> None:
+    """Quitting early keeps the log but leaves the test set as it was."""
+    data = _write(tmp_path / "set.jsonl", _row(id="one"), _row(id="two"))
+    before = data.read_text(encoding="utf-8")
+    log = tmp_path / "log.jsonl"
+    terminal = FakeTerminal("s", "", "q")
+
+    main(["label", "--source", str(data), "--data", str(data), "--log", str(log)], ask=terminal.ask)
+
+    assert data.read_text(encoding="utf-8") == before
+    assert len(load_label_log(log)) == 1
+
+
+def test_cli_split_writes_both_files_and_refuses_to_split_twice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A second split would move postings across the held-out line, so it is refused."""
+    complete = _postings(MIN_PER_LABEL, MIN_PER_LABEL, MIN_POSTINGS)
+    data = _write(tmp_path / "set.jsonl", *[posting.model_dump() for posting in complete])
+    dev, heldout = tmp_path / "dev.jsonl", tmp_path / "heldout.jsonl"
+    argv = ["split", "--data", str(data), "--dev", str(dev), "--heldout", str(heldout)]
+
+    first = main(argv)
+    second = main(argv)
+
+    assert first == 0
+    assert len(load_postings(dev)) + len(load_postings(heldout)) == len(complete)
+    assert second == 1
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_cli_split_refuses_an_incomplete_set(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A set below the required size is not split without the explicit flag."""
+    data = _write(tmp_path / "set.jsonl", _row())
+    argv = [
+        "split",
+        "--data",
+        str(data),
+        "--dev",
+        str(tmp_path / "d"),
+        "--heldout",
+        str(tmp_path / "h"),
+    ]
+
+    assert main(argv) == 1
+    assert "incomplete" in capsys.readouterr().err
